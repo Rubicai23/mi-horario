@@ -36,3 +36,9 @@ y envía la notificación a su hora. Es opcional: si no activas el ajuste, no se
 - No aparece el ajuste: falta la clave del paso 2, o no has iniciado sesión.
 - "No se pudo activar": abre la app desde el icono de la pantalla de inicio (no desde Safari).
 - No llegan avisos: en Firebase → Functions → Registros mira si `sendDueReminders` da errores y envíame el texto.
+
+## Medidas de seguridad de gasto (recomendadas)
+- La función ya limita `maxInstances: 1` y 256 MiB.
+- Alerta de presupuesto de 1 € (50 %, 90 %, 100 %) en Google Cloud → Facturación → Presupuestos y alertas. Solo avisa, no corta.
+- Al desplegar, elige borrar imágenes antiguas tras 1 día (política de limpieza de Artifact Registry).
+- Revisa Facturación los primeros días.

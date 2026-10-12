@@ -10,7 +10,7 @@ initializeApp();
 const DEAD_TOKEN = new Set(['messaging/registration-token-not-registered', 'messaging/invalid-registration-token']);
 
 /** Cada minuto: envía los avisos que ya tocan y deja solo los futuros. */
-exports.sendDueReminders = onSchedule({ schedule: 'every 1 minutes', region: 'europe-west1', timeoutSeconds: 60 }, async () => {
+exports.sendDueReminders = onSchedule({ schedule: 'every 1 minutes', region: 'europe-west1', timeoutSeconds: 60, maxInstances: 1, memory: '256MiB' }, async () => {
   const db = getFirestore();
   const now = Date.now();
   const snap = await db.collection('pushQueue').where('nextAt', '>', 0).where('nextAt', '<=', now).limit(200).get();
