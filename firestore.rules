@@ -45,7 +45,7 @@ service cloud.firestore {
     // ───────────── users/{uid}/profile/main ─────────────
     // Un único documento por usuario con sus plantillas propias, repeticiones semanales, días de descanso, ajustes de racha e insignias.
     function isValidProfile(data) {
-      return data.keys().hasOnly(['templates', 'recurring', 'rest', 'streak', 'badges', 'cats', 'updatedAt'])
+      return data.keys().hasOnly(['templates', 'recurring', 'rest', 'streak', 'badges', 'cats', 'tags', 'updatedAt'])
         && data.keys().hasAll(['templates', 'updatedAt'])
         && data.templates is list
         && data.templates.size() <= 20         // mismo límite que LIMITS.templates en config.js
@@ -54,6 +54,7 @@ service cloud.firestore {
         && (!('streak' in data) || (data.streak is map && data.streak.size() <= 2))             // { goal, days }
         && (!('badges' in data) || (data.badges is map && data.badges.size() <= 40))            // LIMITS.badges
         && (!('cats' in data) || (data.cats is map && data.cats.size() <= 6))                   // una por categoría
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 12))                 // LIMITS.tags
         && data.updatedAt is timestamp
         && data.updatedAt == request.time;
     }
@@ -65,6 +66,23 @@ service cloud.firestore {
         && doc == 'main'
         && isValidProfile(request.resource.data);
 
+      allow delete: if isOwner(uid);
+    }
+
+    // ───────────── pushQueue/{uid} ─────────────
+    // Avisos con la app cerrada: tokens del dispositivo y próximos avisos. La función de la nube (con permisos
+    // de administrador) los lee y los envía; el usuario solo puede tocar el suyo.
+    function isValidPush(data) {
+      return data.keys().hasOnly(['tokens', 'items', 'nextAt', 'updatedAt'])
+        && (!('tokens' in data) || (data.tokens is list && data.tokens.size() <= 5))
+        && (!('items' in data) || (data.items is list && data.items.size() <= 40))   // PUSH.maxItems
+        && (!('nextAt' in data) || data.nextAt is number)
+        && data.updatedAt == request.time;
+    }
+
+    match /pushQueue/{uid} {
+      allow get: if isOwner(uid);
+      allow create, update: if isOwner(uid) && isValidPush(request.resource.data);
       allow delete: if isOwner(uid);
     }
 
