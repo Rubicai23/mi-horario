@@ -79,7 +79,7 @@ export const NOTIFICATIONS = Object.freeze({
 
 /** Avisos con la app cerrada (Web Push vía Firebase Cloud Messaging). Vacío = función oculta.
  *  Se rellena con la clave de Firebase → Configuración → Cloud Messaging → Certificados push web → "Par de claves". */
-export const PUSH = Object.freeze({ vapidKey: '', horizonDays: 3, maxItems: 40 });
+export const PUSH = Object.freeze({ vapidKey: 'BEBFB-SCQcLo7cPFDC14HQ7gsst0CssqVk629VTzJZdXo0ID5fgZIvSqpBKiszzCFw5088Q7oaHrGBDDKFveGxM', horizonDays: 3, maxItems: 40 });
 
 export const BACKUP = Object.freeze({ app: 'mi-horario', version: 1 });
 
