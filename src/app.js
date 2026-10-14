@@ -6,7 +6,7 @@
  * ni HTML (ui-components.js), ni detalles web/nativos (platform.js).
  */
 import {
-  ACCENTS, CATEGORIES, CATEGORY_COLORS, DEFAULT_ACCENT, FIREBASE_CONFIG, LEAD_OPTIONS, LIMITS, MONTH_RANGE, NOTIFICATIONS,
+  ACCENTS, CATEGORY_COLORS, DEFAULT_ACCENT, FIREBASE_CONFIG, LEAD_OPTIONS, LIMITS, MONTH_RANGE, NOTIFICATIONS,
   STREAK_RULES, THEMES, WEEK_RANGE
 } from './config.js';
 import {
@@ -20,9 +20,9 @@ import * as ui from './ui-components.js';
 import { LANG, LOCALE, isEnglish, startTranslator, t } from './i18n.js';
 import { setupMenuAndPomodoro } from './pomodoro-ui.js';
 import { setupTour } from './tour.js';
-import { setupExport } from './export-ui.js';
 import { setupWeekly } from './weekly-ui.js';
 import { setupPush } from './push-ui.js';
+import { setupCalendar } from './calendar-ui.js';
 import { buildShareText } from './summary.js';
 import {
   addDays, dateForDow, formatLongDate, fromHHMM, minutesOfDay, plural, shortTitle, toDateKey, toHHMM, weekDates
@@ -68,9 +68,8 @@ function createContext() {
     badgesSheet: sheets.register($('sheetBadges')),
     menuSheet: sheets.register($('sheetMenu')),
     pomodoroSheet: sheets.register($('sheetPomodoro')),
-    exportSheet: sheets.register($('sheetExport')),
-    tagsSheet: sheets.register($('sheetTags')),
     weeklySheet: sheets.register($('sheetWeekly')),
+    calendarSheet: sheets.register($('sheetCalendar')),
     catsSheet: sheets.register($('sheetCats')),
     deleteSheet: sheets.register($('sheetDelete')),
     view: { selectedDow: clock().getDay(), weekOffset: 0, sorting: false, dateKey: toDateKey(clock()), minuteKey: '', stale: false },
@@ -121,38 +120,20 @@ function applyAppearance(ctx) {
   });
 }
 
-/** Nombres y colores propios de las categorías: variables CSS en la raíz y nombres en la capa de vistas. */
+/** Categorías del usuario: variables de color CSS en la raíz y lista de nombres en la capa de vistas. */
 function applyCategories(ctx) {
-  const cats = ctx.state.getCategories();
-  const signature = JSON.stringify(cats);
+  const list = ctx.state.listCategories();
+  const signature = JSON.stringify(list);
   if (signature === ctx.catSignature) return;
   ctx.catSignature = signature;
   const root = document.documentElement;
-  const names = {};
-  CATEGORIES.forEach(({ key }) => {
-    const own = cats[key] || {};
-    if (own.c && CATEGORY_COLORS[own.c]) root.style.setProperty(`--c-${key}`, CATEGORY_COLORS[own.c]);
-    else root.style.removeProperty(`--c-${key}`);
-    if (own.l) names[key] = own.l;
-  });
-  ui.setCategoryNames(names);
+  const now = new Set(list.map(c => c.key));
+  (ctx.catVars || []).forEach(key => { if (!now.has(key)) root.style.removeProperty(`--c-${key}`); });
+  list.forEach(c => root.style.setProperty(`--c-${c.key}`, CATEGORY_COLORS[c.color] || CATEGORY_COLORS.gris));
+  ctx.catVars = Array.from(now);
+  ui.setCategories(list);
   $('fC').innerHTML = ui.categoryChipsMarkup();
   selectCategory(editor.category);
-}
-
-/** Nombres de las etiquetas en la capa de vistas; si cambian, se repinta el selector del editor. */
-function applyTags(ctx) {
-  const tags = ctx.state.getTags();
-  const signature = JSON.stringify(tags);
-  if (signature === ctx.tagSignature) return;
-  ctx.tagSignature = signature;
-  ui.setTagNames(Object.fromEntries(tags.map(tag => [tag.id, tag.name])));
-  if (editor.tag && !tags.some(tag => tag.id === editor.tag)) editor.tag = '';
-  renderTagChips(ctx);
-}
-
-function renderTagChips(ctx) {
-  $('fG').innerHTML = ui.tagChipsMarkup(ctx.state.getTags(), editor.tag);
 }
 
 function createRenderer(ctx) {
@@ -163,7 +144,8 @@ function createRenderer(ctx) {
   const keepFocus = paint => {
     const active = document.activeElement;
     const item = active && active.closest ? active.closest('#tl .item') : null;
-    const memo = item ? { id: item.dataset.id, selector: active.classList.contains('ck') ? '.ck' : '.row' } : null;
+    const sk = item && active.closest('.sk');
+    const memo = item ? { id: item.dataset.id, selector: sk ? `.sk[data-i="${sk.dataset.i}"] .sk-ck` : active.classList.contains('ck') ? '.ck' : '.row' } : null;
     paint();
     if (!memo) return;
     const target = Array.from($('tl').querySelectorAll('.item')).find(el => el.dataset.id === memo.id);
@@ -174,7 +156,6 @@ function createRenderer(ctx) {
   function render(now = ctx.clock()) {
     view.stale = false;
     applyCategories(ctx);
-    applyTags(ctx);
     const anchor = anchorOf(ctx, now);
     const dates = weekDates(anchor);
     const date = dates.find(d => d.getDay() === view.selectedDow) || anchor;
@@ -342,6 +323,11 @@ function setupList(ctx) {
     const row = e.target.closest('.row');
     if (!row) return;
     const id = row.closest('.item').dataset.id;
+    const subtask = e.target.closest('.sk');
+    if (subtask) {
+      if (e.target.closest('.sk-ck')) state.toggleSubtask(selectedKey(ctx), id, Number(subtask.dataset.i));
+      return;
+    }
     if (e.target.closest('.ck')) toggleDone(ctx, selectedKey(ctx), id);
     else openEditor(ctx, id);
   });
@@ -356,7 +342,7 @@ function setupList(ctx) {
 /* ═════════════ Editor de actividad ═════════════ */
 
 const editor = {
-  key: null, id: null, category: 'libre', tag: '',
+  key: null, id: null, category: 'libre',
   subtasks: [],            // copia de trabajo de las subtareas de la actividad
   rule: null,              // serie semanal a la que pertenece la actividad editada (si sigue vigente)
   repeat: false,           // interruptor "repetir" / "aplicar a las próximas semanas"
@@ -403,7 +389,6 @@ function openEditor(ctx, id) {
     $('fE').value = toHHMM(block.e);
     $('fN').value = block.n;
     selectCategory(block.c);
-    editor.tag = block.g || '';
   } else {
     const lastEnd = blocks.length ? Math.max(...blocks.map(b => b.e)) : 9 * 60;
     const start = Math.min(lastEnd, 22 * 60 + 30);
@@ -411,14 +396,12 @@ function openEditor(ctx, id) {
     $('fS').value = toHHMM(start);
     $('fE').value = toHHMM(Math.min(start + 60, 1439));
     $('fN').value = '';
-    selectCategory('libre');
-    editor.tag = '';
+    selectCategory(ctx.state.listCategories().some(c => c.key === 'libre') ? 'libre' : (ctx.state.listCategories()[0] || {}).key);
   }
 
   editor.subtasks = block && block.k ? block.k.map(item => ({ ...item })) : [];
   $('fKnew').value = '';
-  $('fGnew').value = '';
-  renderTagChips(ctx);
+  $('fCnew').value = '';
   renderSubtasks();
 
   // Repetición: una actividad de una serie vigente se puede cambiar "para las próximas semanas" o dejar de repetir.
@@ -459,27 +442,18 @@ function selectCategory(key) {
 
 function setupEditor(ctx) {
   const { state, toast } = ctx;
-  $('fG').addEventListener('click', e => {
-    const chip = e.target.closest('[data-g]');
-    if (!chip) return;
-    editor.tag = chip.dataset.g;
-    renderTagChips(ctx);
-    const again = document.querySelector(`#fG [data-g="${editor.tag}"]`);
-    if (again) again.focus();
-  });
-  const addTagFromEditor = () => {
-    const name = $('fGnew').value.trim();
+  const addCategoryFromEditor = () => {
+    const name = $('fCnew').value.trim();
     if (!name) return;
-    const result = state.addTag(name);
+    const result = state.addCategory(name);
     if (!result.ok) { showEditorError(result.error); return; }
     showEditorError('');
-    editor.tag = result.tag.id;
-    $('fGnew').value = '';
-    applyTags(ctx);
-    renderTagChips(ctx);
+    $('fCnew').value = '';
+    applyCategories(ctx);
+    selectCategory(result.category.key);
   };
-  $('fGadd').addEventListener('click', addTagFromEditor);
-  $('fGnew').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTagFromEditor(); } });
+  $('fCadd').addEventListener('click', addCategoryFromEditor);
+  $('fCnew').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addCategoryFromEditor(); } });
   $('fC').innerHTML = ui.categoryChipsMarkup();
   $('fC').addEventListener('click', e => {
     const chip = e.target.closest('.chip');
@@ -539,8 +513,7 @@ function setupEditor(ctx) {
       e: fromHHMM($('fE').value),
       c: editor.category,
       n: $('fN').value.trim(),
-      k: editor.subtasks,
-      g: editor.tag
+      k: editor.subtasks
     };
     const dows = Array.from(editor.dows);
     let result;
@@ -549,7 +522,7 @@ function setupEditor(ctx) {
       result = state.updateBlock(editor.key, editor.id, draft);
       if (result.ok && editor.repeat) {
         series = editor.rule
-          ? state.changeRecurring(editor.rule.id, editor.key, { t: draft.t, c: draft.c, s: draft.s, e: draft.e, k: draft.k, g: draft.g, dows })
+          ? state.changeRecurring(editor.rule.id, editor.key, { t: draft.t, c: draft.c, s: draft.s, e: draft.e, k: draft.k, dows })
           : state.addRecurring(editor.key, draft, dows, { blockId: editor.id });
       }
     } else if (editor.repeat) {
@@ -763,7 +736,6 @@ function setupStats(ctx) {
       $('sgTitle').textContent = 'Esta semana';
       $('statsRange').textContent = ui.weekRangeLabel(weekDates(now));
       $('statsBody').innerHTML = ui.statsMarkup(ctx.state.weekSummary(now));
-      $('statsTags').innerHTML = ui.tagStatsMarkup(ctx.state.weekTagSummary(now), ctx.state.getTags());
       return;
     }
     const result = ctx.state.monthSummary(now, stats.month);
@@ -775,7 +747,6 @@ function setupStats(ctx) {
     });
     $('statsBody').innerHTML = ui.statsMarkup(result.summary, { empty: 'Sin actividades este mes.' })
       + ui.monthDaysMarkup({ counted: result.countedDays, met: result.metDays });
-    $('statsTags').innerHTML = ui.tagStatsMarkup(result.tagSummary, ctx.state.getTags());
     const again = focused && $(focused);
     if (again && again.closest('#statsNav') && !again.disabled) again.focus();
   }
@@ -797,8 +768,8 @@ function setupStats(ctx) {
   $('shareStats').addEventListener('click', async () => {
     const now = ctx.clock();
     const text = buildShareText({
-      summary: ctx.state.weekSummary(now), range: ui.weekRangeLabel(weekDates(now)), streak: ctx.state.streakView(now).current,
-      categories: CATEGORIES, nameOf: ui.categoryName
+      summary: ui.foldSummary(ctx.state.weekSummary(now)), range: ui.weekRangeLabel(weekDates(now)), streak: ctx.state.streakView(now).current,
+      categories: ui.summaryCategories(), nameOf: ui.categoryName
     });
     try {
       const result = await shareText(text);
@@ -809,60 +780,44 @@ function setupStats(ctx) {
   $('closeStats').addEventListener('click', ctx.statsSheet.close);
 }
 
-/* ═════════════ Etiquetas ═════════════ */
-
-function setupTags(ctx) {
-  const { state, toast } = ctx;
-  const paint = () => { $('tagList').innerHTML = ui.tagManagerMarkup(state.getTags()); };
-  const showError = message => { $('tagErr').textContent = message || ''; $('tagErr').hidden = !message; };
-
-  $('menuTags').addEventListener('click', () => { showError(''); $('tagNew').value = ''; paint(); ctx.tagsSheet.open(); });
-  $('closeTags').addEventListener('click', ctx.tagsSheet.close);
-
-  const add = () => {
-    const name = $('tagNew').value.trim();
-    if (!name) return;
-    const result = state.addTag(name);
-    if (!result.ok) { showError(result.error); return; }
-    showError('');
-    $('tagNew').value = '';
-    ctx.cloud.track('tag_created');
-    paint();
-  };
-  $('tagAdd').addEventListener('click', add);
-  $('tagNew').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
-
-  $('tagList').addEventListener('change', e => {
-    const input = e.target.closest('[data-tag-name]');
-    if (!input) return;
-    const result = state.renameTag(input.dataset.tagName, input.value);
-    if (!result.ok) { showError(result.error); paint(); return; }
-    showError('');
-    paint();
-  });
-  $('tagList').addEventListener('click', e => {
-    const button = e.target.closest('[data-act="delete-tag"]');
-    if (!button) return;
-    const result = state.deleteTag(button.dataset.id);
-    if (!result.ok) return;
-    showError('');
-    paint();
-    toast.show('Etiqueta eliminada', { label: 'Deshacer', onAction: () => { state.restoreTag(result.removed); } });
-  });
-}
-
 /* ═════════════ Categorías propias ═════════════ */
 
 function setupCategories(ctx) {
   const { state, toast } = ctx;
-  const paint = () => { $('catList').innerHTML = ui.categoriesMarkup(state.getCategories()); };
+  const paint = () => { $('catList').innerHTML = ui.categoriesMarkup(state.listCategories()); };
+  const showError = message => { $('catErr').textContent = message || ''; $('catErr').hidden = !message; };
 
-  $('openCats').addEventListener('click', () => { paint(); ctx.catsSheet.open(); });
+  $('openCats').addEventListener('click', () => { showError(''); $('catNew').value = ''; paint(); ctx.catsSheet.open(); });
+
+  const add = () => {
+    const name = $('catNew').value.trim();
+    if (!name) return;
+    const result = state.addCategory(name);
+    if (!result.ok) { showError(result.error); return; }
+    showError('');
+    $('catNew').value = '';
+    applyCategories(ctx);
+    paint();
+    ctx.cloud.track('category_created');
+  };
+  $('catAdd').addEventListener('click', add);
+  $('catNew').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
 
   $('catList').addEventListener('click', e => {
+    const del = e.target.closest('[data-act="del-cat"]');
+    if (del) {
+      const result = state.removeCategory(del.dataset.cat);
+      if (!result.ok) { if (result.error) showError(result.error); return; }
+      showError('');
+      applyCategories(ctx);
+      paint();
+      toast.show('Categoría eliminada', { label: 'Deshacer', onAction: () => { result.undo(); applyCategories(ctx); if ($('sheetCats').classList.contains('open')) paint(); } });
+      return;
+    }
     const swatch = e.target.closest('[data-cat][data-color]');
     if (!swatch) return;
     state.setCategory(swatch.dataset.cat, { color: swatch.dataset.color });
+    applyCategories(ctx);
     swatch.parentElement.querySelectorAll('.swatch').forEach(el => {
       const on = el === swatch;
       el.classList.toggle('sel', on);
@@ -872,18 +827,23 @@ function setupCategories(ctx) {
 
   const saveName = input => {
     const key = input.dataset.catName;
-    const current = (state.getCategories()[key] || {}).l || '';
+    const current = (state.listCategories().find(c => c.key === key) || {}).label || '';
     const next = input.value.replace(/\s+/g, ' ').trim();
     if (next === current) return;
-    state.setCategory(key, { label: next });
+    const result = state.setCategory(key, { label: next });
+    if (!result.ok) { if (result.error) showError(result.error); paint(); return; }
+    showError('');
+    applyCategories(ctx);
+    paint();
   };
   $('catList').addEventListener('change', e => { if (e.target.matches('[data-cat-name]')) saveName(e.target); });
 
   $('catsReset').addEventListener('click', () => {
     const result = state.resetCategories();
     if (!result.changed) { toast.show('Ya están los nombres y colores originales.'); return; }
+    applyCategories(ctx);
     paint();
-    toast.show('Categorías restauradas', { label: 'Deshacer', onAction: () => { result.undo(); if ($('sheetCats').classList.contains('open')) paint(); } });
+    toast.show('Categorías restauradas', { label: 'Deshacer', onAction: () => { result.undo(); applyCategories(ctx); if ($('sheetCats').classList.contains('open')) paint(); } });
   });
 
   $('closeCats').addEventListener('click', () => {
@@ -1373,14 +1333,13 @@ function main() {
   setupDayMenu(ctx);
   setupBadges(ctx);
   setupTour(ctx);
-  setupExport(ctx);
   setupWeekly(ctx);
   setupPush(ctx);
+  setupCalendar(ctx);
   setupNative(ctx);
   setupMenuAndPomodoro(ctx, { openBadges: () => openBadges(ctx), openTour: () => ctx.openTour() });
   setupCategories(ctx);
   setupStats(ctx);
-  setupTags(ctx);
   setupSettings(ctx);
   setupAccount(ctx);
   setupClock(ctx).start();

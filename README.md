@@ -112,8 +112,9 @@ npm run cap:android      # build + sync + abrir Android Studio
 
 ## Tanda 6
 
-- **Etiquetas** (☰ → Etiquetas): agrupan actividades por proyecto y aparecen en Estadísticas. Se sincronizan (campo `tags` del perfil: hay que republicar `firestore.rules`).
-- **Exportar al calendario** (☰ → Exportar): archivo `.ics` para Calendario de iPhone / Google Calendar (`src/ics.js`).
+- **Categorías propias** (Ajustes → Categorías, o *Nueva categoría* al crear una actividad): se crean, renombran, colorean y borran; las 6 iniciales también se pueden borrar. Se sincronizan en el perfil (`cats`; hay que republicar `firestore.rules`).
+- **Subtareas visibles** bajo cada actividad en la lista; se marcan sin abrirla.
+- **Calendario conectado** (☰ → Conectar con mi calendario): enlace secreto servido por la función `calendarFeed`. Sustituye al antiguo "Exportar .ics".
 - **Resumen semanal automático** (Ajustes → Resumen cada semana): opcional, apagado por defecto.
 - **Avisos con la app cerrada**: ver `AVISOS-PUSH.md` (necesita plan Blaze y desplegar `functions/`).
-- **Widget**: no es posible en iPhone sin app nativa de iOS (Swift/WidgetKit y un Mac con Xcode).
+- Se eliminaron las etiquetas y la exportación a `.ics`.

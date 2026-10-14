@@ -11,7 +11,7 @@
  * Los días son inmutables (arrays congelados): cada cambio crea un array nuevo.
  */
 import {
-  ACCENTS, BACKUP, BADGES, CATEGORIES, CATEGORY_COLORS, LEAD_OPTIONS, LIMITS, MAX_MIN, PRESETS, STORAGE, STREAK_RULES, THEMES
+  ACCENTS, BACKUP, BADGES, CATEGORIES, CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR, LEAD_OPTIONS, LIMITS, MAX_MIN, PRESETS, STORAGE, STREAK_RULES, THEMES
 } from './config.js';
 import {
   addDays, diffDays, fromHHMM, isDateKey, parseDateKey, startOfDay, toDateKey, toHHMM, uid, weekDates
@@ -19,6 +19,8 @@ import {
 import { t as translate } from './i18n.js';
 
 const CATEGORY_KEYS = new Set(CATEGORIES.map(c => c.key));
+const CUSTOM_CAT_RE = /^u[a-z0-9]{1,12}$/;
+const isCategoryId = key => typeof key === 'string' && (CATEGORY_KEYS.has(key) || CUSTOM_CAT_RE.test(key));
 const BLOCK_ID_RE = /^[\w-]{1,40}$/;
 const PRESET_ID_RE = /^[a-z0-9-]{1,24}$/;
 const TEMPLATE_ID_RE = /^t[a-z0-9]{1,20}$/;
@@ -33,7 +35,6 @@ const BACKUP_SETTINGS = Object.freeze({
 });
 const BACKUP_SETTING_KEYS = Object.freeze(Object.keys(BACKUP_SETTINGS));
 const RULE_ID_RE = /^r[a-z0-9]{1,20}$/;
-const TAG_ID_RE = /^g[a-z0-9]{1,20}$/;
 
 export const EMPTY_DAY = Object.freeze([]);
 export const byStart = (a, b) => a.s - b.s || a.e - b.e;
@@ -62,7 +63,7 @@ export function sanitizeBlock(raw) {
   const block = {
     id: typeof raw.id === 'string' && BLOCK_ID_RE.test(raw.id) ? raw.id : uid(),
     s, e, t,
-    c: CATEGORY_KEYS.has(raw.c) ? raw.c : 'rutina',
+    c: isCategoryId(raw.c) ? raw.c : 'rutina',
     n: typeof raw.n === 'string' ? raw.n.slice(0, LIMITS.noteLength) : '',
     d: raw.d === true
   };
@@ -70,7 +71,6 @@ export function sanitizeBlock(raw) {
   const k = sanitizeSubtasks(raw.k);
   if (k.length) block.k = k;
   if (typeof raw.r === 'string' && RULE_ID_RE.test(raw.r)) block.r = raw.r;   // regla semanal de la que procede
-  if (typeof raw.g === 'string' && TAG_ID_RE.test(raw.g)) block.g = raw.g;   // etiqueta (id de profile.tags)
   return block;
 }
 
@@ -102,13 +102,12 @@ function structureOf(block) {
 /** Regla: { id, t, c, s, e, dows:[0-6], from, until?, k? }. Genera una actividad cada semana en esos días. */
 export function sanitizeRule(raw) {
   if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !RULE_ID_RE.test(raw.id)) return null;
-  const base = sanitizeBlock({ id: 'x', s: raw.s, e: raw.e, t: raw.t, c: raw.c, k: raw.k, g: raw.g });
+  const base = sanitizeBlock({ id: 'x', s: raw.s, e: raw.e, t: raw.t, c: raw.c, k: raw.k });
   const dows = Array.from(new Set((Array.isArray(raw.dows) ? raw.dows : []).map(Number)
     .filter(n => Number.isInteger(n) && n >= 0 && n <= 6))).sort((a, b) => a - b);
   if (!base || !dows.length || !isDateKey(raw.from)) return null;
   const rule = { id: raw.id, t: base.t, c: base.c, s: base.s, e: base.e, dows, from: raw.from };
   if (base.k) rule.k = base.k.map(item => ({ t: item.t, d: false }));
-  if (base.g) rule.g = base.g;
   if (isDateKey(raw.until)) rule.until = raw.until;
   return rule;
 }
@@ -122,7 +121,7 @@ export const ruleAppliesOn = (rule, key) => key >= rule.from
 export const occurrenceId = (rule, key) => `${rule.id}-${key.replace(/-/g, '')}`;
 
 export const occurrenceBlock = (rule, key) => sanitizeBlock({
-  id: occurrenceId(rule, key), s: rule.s, e: rule.e, t: rule.t, c: rule.c, n: '', d: false, k: rule.k, g: rule.g, r: rule.id
+  id: occurrenceId(rule, key), s: rule.s, e: rule.e, t: rule.t, c: rule.c, n: '', d: false, k: rule.k, r: rule.id
 });
 
 /** Actividades que las reglas generan para un día (sin guardar). */
@@ -132,47 +131,42 @@ export const expandRules = (rules, key) => rules
   .filter(Boolean)
   .sort(byStart);
 
-/** Etiquetas propias: [{ id, name }] (únicas por id y por nombre sin distinguir mayúsculas, con tope). */
-export function sanitizeTags(raw) {
-  if (!Array.isArray(raw)) return [];
-  const ids = new Set();
-  const names = new Set();
-  const out = [];
-  raw.forEach(item => {
-    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !TAG_ID_RE.test(item.id)) return;
-    const name = typeof item.name === 'string' ? item.name.trim().replace(/\s+/g, ' ').slice(0, LIMITS.tagName) : '';
-    if (!name || ids.has(item.id) || names.has(name.toLowerCase()) || out.length >= LIMITS.tags) return;
-    ids.add(item.id);
-    names.add(name.toLowerCase());
-    out.push({ id: item.id, name });
+/**
+ * Categorías del usuario: { clase: { l: 'Mates', c: 'rojo' }, gym: { x: 1 }, u3k2j: { l: 'Guitarra', c: 'azul' } }.
+ *  - Las 6 iniciales pueden cambiar de nombre y color, o marcarse como eliminadas (x: 1).
+ *  - Las propias tienen id "u…" y siempre llevan nombre. Solo se admiten colores de la paleta.
+ */
+export function sanitizeCategories(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  let count = 0;
+  Object.entries(raw).forEach(([key, item]) => {
+    const builtin = CATEGORY_KEYS.has(key);
+    if ((!builtin && !CUSTOM_CAT_RE.test(key)) || !item || typeof item !== 'object' || count >= LIMITS.categories + CATEGORIES.length) return;
+    const entry = {};
+    const label = typeof item.l === 'string' ? item.l.replace(/\s+/g, ' ').trim().slice(0, LIMITS.categoryLabel) : '';
+    if (builtin && item.x === 1) {
+      out[key] = { x: 1 };
+      count += 1;
+      return;
+    }
+    if (label) entry.l = label;
+    if (typeof item.c === 'string' && Object.hasOwn(CATEGORY_COLORS, item.c)) entry.c = item.c;
+    if (builtin ? (entry.l || entry.c) : entry.l) { out[key] = entry; count += 1; }
   });
   return out;
 }
 
-/** Tiempo planificado y hecho por etiqueta (las actividades sin etiqueta, o con una ya borrada, no cuentan). */
-export function summarizeTags(blocksPerDay, tags) {
-  const known = new Set(tags.map(t => t.id));
-  return blocksPerDay.reduce((all, day) => all.concat(day), []).reduce((acc, b) => {
-    if (!b.g || !known.has(b.g)) return acc;
-    const entry = acc[b.g] || (acc[b.g] = { planned: 0, done: 0 });
-    entry.planned += b.e - b.s;
-    if (b.d) entry.done += b.e - b.s;
-    return acc;
-  }, {});
-}
-
-/** Nombre y color propios de las categorías: { clase: { l: 'Mates', c: 'rojo' } }. Solo valores permitidos. */
-export function sanitizeCategories(raw) {
-  const out = {};
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-  CATEGORIES.forEach(({ key }) => {
-    const item = raw[key];
-    if (!item || typeof item !== 'object') return;
-    const entry = {};
-    const label = typeof item.l === 'string' ? item.l.replace(/\s+/g, ' ').trim().slice(0, LIMITS.categoryLabel) : '';
-    if (label) entry.l = label;
-    if (typeof item.c === 'string' && Object.hasOwn(CATEGORY_COLORS, item.c)) entry.c = item.c;
-    if (entry.l || entry.c) out[key] = entry;
+/** Lista de categorías activas, en orden: las iniciales no eliminadas y después las propias. */
+export function activeCategories(cats = {}) {
+  const out = [];
+  CATEGORIES.forEach(({ key, label }) => {
+    const own = cats[key] || {};
+    if (own.x) return;
+    out.push({ key, label: own.l || label, color: own.c || DEFAULT_CATEGORY_COLOR[key], builtin: true });
+  });
+  Object.entries(cats).forEach(([key, own]) => {
+    if (CUSTOM_CAT_RE.test(key) && own.l) out.push({ key, label: own.l, color: own.c || 'gris', builtin: false });
   });
   return out;
 }
@@ -203,8 +197,6 @@ export function sanitizeProfile(raw) {
   if (Object.keys(badges).length) profile.badges = badges;
   const cats = sanitizeCategories(raw.cats);
   if (Object.keys(cats).length) profile.cats = cats;
-  const tags = sanitizeTags(raw.tags);
-  if (tags.length) profile.tags = tags;
   return profile;
 }
 
@@ -212,7 +204,6 @@ export function sanitizeProfile(raw) {
 export const profileHasData = profile => Boolean(profile && (
   profile.templates.length || profile.recurring.length || (profile.rest && profile.rest.length)
   || profile.streak || (profile.badges && Object.keys(profile.badges).length) || (profile.cats && Object.keys(profile.cats).length)
-  || (profile.tags && profile.tags.length)
 ));
 
 /** Une dos mapas de insignias: se queda la fecha más antigua de cada una. */
@@ -410,7 +401,7 @@ export function summarizeWeek(blocksPerDay) {
 }
 
 /** Resumen de un mes natural: tiempo por categoría y días con objetivo cumplido (sin comparar con otros meses). */
-export function summarizeMonth({ blocksAt, year, month, config = DEFAULT_STREAK, rest = NO_REST, tags = [] }) {
+export function summarizeMonth({ blocksAt, year, month, config = DEFAULT_STREAK, rest = NO_REST }) {
   const length = new Date(year, month + 1, 0).getDate();
   const perDay = [];
   let counted = 0;
@@ -424,7 +415,7 @@ export function summarizeMonth({ blocksAt, year, month, config = DEFAULT_STREAK,
     counted += 1;
     if (dayProgress(blocks, config.goal).met) met += 1;
   }
-  return { year, month, summary: summarizeWeek(perDay), tagSummary: summarizeTags(perDay, tags), countedDays: counted, metDays: met };
+  return { year, month, summary: summarizeWeek(perDay), countedDays: counted, metDays: met };
 }
 
 /** Recoloca las actividades en el orden dado conservando la duración de cada una. */
@@ -694,7 +685,6 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
     if (value.cats && Object.keys(value.cats).length) {
       out.cats = Object.freeze(Object.fromEntries(Object.entries(value.cats).map(([k, v]) => [k, Object.freeze({ ...v })])));
     }
-    if (value.tags && value.tags.length) out.tags = Object.freeze(value.tags.map(t => Object.freeze({ id: t.id, name: t.name })));
     return Object.freeze(out);
   };
   let profile = null;
@@ -837,6 +827,15 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
       return { ok: true };
     },
 
+    /** Marca o desmarca una subtarea de una actividad (también de las que vienen de una repetición). */
+    toggleSubtask(key, id, index) {
+      assertDateKey(key);
+      const block = load(key).find(b => b.id === id);
+      if (!block || !block.k || !block.k[index]) return { ok: false };
+      const k = block.k.map((item, i) => (i === index ? { ...item, d: !item.d } : { ...item }));
+      return api.updateBlock(key, id, { k });
+    },
+
     toggleDone(key, id) {
       assertDateKey(key);
       const current = load(key);
@@ -932,7 +931,7 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
         return { ok: false, error: `Máximo ${LIMITS.recurring} repeticiones. Quita alguna.` };
       }
       const rule = sanitizeRule({
-        id: newRuleId(), t: draft.t, c: draft.c, s: draft.s, e: draft.e, k: draft.k, g: draft.g,
+        id: newRuleId(), t: draft.t, c: draft.c, s: draft.s, e: draft.e, k: draft.k,
         dows: [...(Array.isArray(dows) ? dows : []), dowOf(key)], from: key
       });
       if (!rule) return { ok: false, error: 'La repetición no es válida.' };
@@ -1009,7 +1008,6 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
         s: 's' in patch ? patch.s : old.s,
         e: 'e' in patch ? patch.e : old.e,
         k: 'k' in patch ? patch.k : old.k,
-        g: 'g' in patch ? patch.g : old.g,
         dows: 'dows' in patch ? patch.dows : old.dows
       };
       const error = validateDraft(merged);
@@ -1187,54 +1185,38 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
       return { ok: true, changed: true, undo: () => api.setRestDay(key, !on) };
     },
 
-    /* Etiquetas propias (se sincronizan con el perfil) */
-    getTags: () => loadProfile().tags || [],
-    tagName: id => ((loadProfile().tags || []).find(t => t.id === id) || {}).name || '',
-    addTag(name) {
-      const tags = loadProfile().tags || [];
-      const clean = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ').slice(0, LIMITS.tagName) : '';
-      if (!clean) return { ok: false, error: 'Escribe un nombre para la etiqueta.' };
-      if (tags.length >= LIMITS.tags) return { ok: false, error: `Máximo ${LIMITS.tags} etiquetas. Elimina alguna.` };
-      if (tags.some(t => t.name.toLowerCase() === clean.toLowerCase())) return { ok: false, error: 'Ya tienes una etiqueta con ese nombre.' };
-      const tag = { id: `g${uid().slice(1, 13)}`, name: clean };
-      commitProfile({ ...loadProfile(), tags: [...tags, tag] });
-      return { ok: true, tag };
-    },
-    renameTag(id, name) {
-      const tags = loadProfile().tags || [];
-      const clean = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ').slice(0, LIMITS.tagName) : '';
-      if (!tags.some(t => t.id === id)) return { ok: false, error: 'La etiqueta ya no existe.' };
-      if (!clean) return { ok: false, error: 'Escribe un nombre para la etiqueta.' };
-      if (tags.some(t => t.id !== id && t.name.toLowerCase() === clean.toLowerCase())) return { ok: false, error: 'Ya tienes una etiqueta con ese nombre.' };
-      commitProfile({ ...loadProfile(), tags: tags.map(t => (t.id === id ? { ...t, name: clean } : t)) });
-      return { ok: true };
-    },
-    /** Las actividades que la usaban quedan sin etiqueta (su id sobrante se ignora). */
-    deleteTag(id) {
-      const tags = loadProfile().tags || [];
-      const removed = tags.find(t => t.id === id);
-      if (!removed) return { ok: false };
-      const next = { ...loadProfile() };
-      const rest = tags.filter(t => t.id !== id);
-      if (rest.length) next.tags = rest; else delete next.tags;
-      commitProfile(next);
-      return { ok: true, removed };
-    },
-    restoreTag(tag) {
-      const tags = loadProfile().tags || [];
-      const [clean] = sanitizeTags([tag]);
-      if (!clean || tags.some(t => t.id === clean.id || t.name.toLowerCase() === clean.name.toLowerCase())) return { ok: false };
-      commitProfile({ ...loadProfile(), tags: [...tags, clean].slice(0, LIMITS.tags) });
-      return { ok: true };
-    },
-
-    /* Categorías con nombre y color propios (se sincronizan con el perfil) */
+    /* Categorías: las iniciales (editables y eliminables) y las que crea el usuario; se sincronizan con el perfil */
     getCategories: () => loadProfile().cats || {},
+    listCategories: () => activeCategories(loadProfile().cats || {}),
+    addCategory(name, color) {
+      const cats = loadProfile().cats || {};
+      const clean = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim().slice(0, LIMITS.categoryLabel) : '';
+      if (!clean) return { ok: false, error: 'Escribe un nombre para la categoría.' };
+      const active = activeCategories(cats);
+      if (active.some(c => c.label.toLowerCase() === clean.toLowerCase())) return { ok: false, error: 'Ya tienes una categoría con ese nombre.' };
+      if (active.length >= LIMITS.categories) return { ok: false, error: `Máximo ${LIMITS.categories} categorías. Elimina alguna.` };
+      const palette = Object.keys(CATEGORY_COLORS);
+      const used = new Set(active.map(c => c.color));
+      const chosen = typeof color === 'string' && palette.includes(color) ? color : (palette.find(id => !used.has(id)) || palette[active.length % palette.length]);
+      const key = `u${uid().slice(1, 13)}`;
+      commitProfile({ ...loadProfile(), cats: sanitizeCategories({ ...cats, [key]: { l: clean, c: chosen } }) });
+      return { ok: true, category: { key, label: clean, color: chosen, builtin: false } };
+    },
     setCategory(key, patch = {}) {
-      if (!CATEGORIES.some(c => c.key === key)) return { ok: false };
       const current = loadProfile().cats || {};
+      const builtin = CATEGORY_KEYS.has(key);
+      if (!builtin && !(CUSTOM_CAT_RE.test(key) && current[key])) return { ok: false };
       const entry = { ...(current[key] || {}) };
-      if ('label' in patch) entry.l = patch.label;
+      delete entry.x;
+      if ('label' in patch) {
+        const clean = typeof patch.label === 'string' ? patch.label.replace(/\s+/g, ' ').trim().slice(0, LIMITS.categoryLabel) : '';
+        if (clean && activeCategories(current).some(c => c.key !== key && c.label.toLowerCase() === clean.toLowerCase())) {
+          return { ok: false, error: 'Ya tienes una categoría con ese nombre.' };
+        }
+        if (clean) entry.l = clean;
+        else if (builtin) delete entry.l;      // vuelve al nombre original
+        else return { ok: false, error: 'Escribe un nombre para la categoría.' };
+      }
       if ('color' in patch) entry.c = patch.color;
       const cats = sanitizeCategories({ ...current, [key]: entry });
       const next = { ...loadProfile() };
@@ -1243,11 +1225,28 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
       commitProfile(next);
       return { ok: true };
     },
+    /** Elimina una categoría (inicial o propia). Las actividades que la usaban pasan a "Sin categoría". */
+    removeCategory(key) {
+      const current = loadProfile().cats || {};
+      const active = activeCategories(current);
+      if (!active.some(c => c.key === key)) return { ok: false };
+      if (active.length <= 1) return { ok: false, error: 'Necesitas al menos una categoría.' };
+      const cats = { ...current };
+      if (CATEGORY_KEYS.has(key)) cats[key] = { x: 1 }; else delete cats[key];
+      const next = { ...loadProfile() };
+      const clean = sanitizeCategories(cats);
+      if (Object.keys(clean).length) next.cats = clean; else delete next.cats;
+      commitProfile(next);
+      return { ok: true, undo: () => commitProfile({ ...loadProfile(), cats: current }) };
+    },
+    /** Recupera nombres, colores y las 6 categorías iniciales; las propias se conservan. */
     resetCategories() {
       const previous = loadProfile().cats;
       if (!previous || !Object.keys(previous).length) return { ok: true, changed: false };
+      const customs = Object.fromEntries(Object.entries(previous).filter(([key]) => CUSTOM_CAT_RE.test(key)));
+      if (JSON.stringify(customs) === JSON.stringify(previous)) return { ok: true, changed: false };
       const next = { ...loadProfile() };
-      delete next.cats;
+      if (Object.keys(customs).length) next.cats = customs; else delete next.cats;
       commitProfile(next);
       return { ok: true, changed: true, undo: () => commitProfile({ ...loadProfile(), cats: previous }) };
     },
@@ -1272,13 +1271,10 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
     weekSummary(now = clock()) {
       return summarizeWeek(weekDates(now).map(d => load(toDateKey(d))));
     },
-    weekTagSummary(now = clock()) {
-      return summarizeTags(weekDates(now).map(d => load(toDateKey(d))), loadProfile().tags || []);
-    },
     monthSummary(now = clock(), offset = 0) {
       const target = new Date(now.getFullYear(), now.getMonth() + offset, 1);
       return summarizeMonth({
-        blocksAt: load, year: target.getFullYear(), month: target.getMonth(), config: streakConfig(), rest: restSet(), tags: loadProfile().tags || []
+        blocksAt: load, year: target.getFullYear(), month: target.getMonth(), config: streakConfig(), rest: restSet()
       });
     },
     nextPlannedDay: (now = clock()) => findNextPlannedDay({ blocksAt: load, from: now }),
@@ -1340,7 +1336,6 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
         rest: remote.rest == null ? local.rest : clean.rest,
         streak: remote.streak == null ? local.streak : clean.streak,
         cats: remote.cats == null ? local.cats : clean.cats,
-        tags: remote.tags == null ? local.tags : clean.tags,
         badges: unionBadges(local.badges, clean.badges)
       });
       const extraBadges = Object.keys(merged.badges || {}).length > Object.keys(clean.badges || {}).length;
@@ -1413,7 +1408,6 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
           rest: Array.from(new Set([...(current.rest || []), ...(imported.rest || [])])),
           streak: current.streak || imported.streak,
           cats: { ...imported.cats, ...current.cats },
-          tags: [...(current.tags || []), ...(imported.tags || [])],
           badges: unionBadges(current.badges, imported.badges)
         }), 'import');
       }

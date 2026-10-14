@@ -6,24 +6,34 @@
  * llama a las funciones que le pasan. Todo texto de usuario se escapa con escapeHtml.
  */
 import { t } from './i18n.js';
-import { ACCENTS, CATEGORIES, CATEGORY_COLORS, DAY_LETTERS, DAY_NAMES, DEFAULT_CATEGORY_COLOR, THEMES } from './config.js';
+import { ACCENTS, CATEGORY_COLORS, DAY_LETTERS, DAY_NAMES, THEMES } from './config.js';
 import {
   addDays, escapeHtml, formatDuration, formatLongDate, formatShortDate, formatTotal, pad, parseDateKey, plural, toDateKey, toHHMM
 } from './utils.js';
 
 export const $ = id => document.getElementById(id);
 
-/** Nombres propios de las categorías (los define el usuario; si falta uno se usa el original). */
-let categoryNames = {};
-export const setCategoryNames = map => { categoryNames = { ...map }; };
-/** Nombres de las etiquetas (id → nombre), los pone la app desde el perfil. */
-let tagNames = {};
-export const setTagNames = map => { tagNames = { ...map }; };
-export const tagLabel = id => tagNames[id] || '';
-
-export const categoryName = key => categoryNames[key] || (CATEGORIES.find(c => c.key === key) || {}).label || key;
-
-const CATEGORY_BY_KEY = Object.freeze(Object.fromEntries(CATEGORIES.map(c => [c.key, c])));
+/** Categorías activas (las pone la app desde el perfil): [{ key, label }]. Cada una tiene su color en --c-<key>. */
+let categories = [];
+export const setCategories = list => { categories = list.map(c => ({ key: c.key, label: c.label })); };
+export const ORPHAN = '_';
+const catColor = key => (categories.some(c => c.key === key) ? `var(--c-${key})` : 'var(--c-rutina)');
+export const categoryName = key => {
+  const found = categories.find(c => c.key === key);
+  return found ? found.label : t('Sin categoría');
+};
+/** Agrupa bajo "_" lo que pertenece a categorías ya eliminadas, para que las estadísticas sigan sumando. */
+export const foldSummary = summary => {
+  const known = new Set(categories.map(c => c.key));
+  return Object.entries(summary).reduce((acc, [key, value]) => {
+    const k = known.has(key) ? key : ORPHAN;
+    const entry = acc[k] || (acc[k] = { planned: 0, done: 0 });
+    entry.planned += value.planned || 0;
+    entry.done += value.done || 0;
+    return acc;
+  }, {});
+};
+export const summaryCategories = () => [...categories, { key: ORPHAN, label: t('Sin categoría') }];
 
 /* ═══════════════ Iconos (trazo con currentColor, se colorean desde CSS) ═══════════════ */
 export const ICONS = Object.freeze({
@@ -200,10 +210,19 @@ export function quickAddMarkup(presets) {
 const itemMeta = b => {
   const parts = [];
   if (b.r) parts.push(`<span class="mt">${ICONS.repeat}${t('Cada semana')}</span>`);
-  if (b.g && tagLabel(b.g)) parts.push(`<span class="mt tag" translate="no">#${escapeHtml(tagLabel(b.g))}</span>`);
   if (b.k && b.k.length) parts.push(`<span class="mt">${t('{0}/{1} subtareas', b.k.filter(item => item.d).length, b.k.length)}</span>`);
   return parts.length ? `<div class="meta">${parts.join('')}</div>` : '';
 };
+
+/** Subtareas colgando de la actividad: se marcan desde la lista, sin abrirla. */
+const listSubtasksMarkup = (b, sorting) => (b.k && b.k.length
+  ? `<ul class="sks">${b.k.map((item, i) => (
+    `<li class="sk${item.d ? ' done' : ''}" data-i="${i}">` +
+    (sorting ? '<span class="sk-dot"></span>'
+      : `<button type="button" class="sk-ck" aria-pressed="${item.d}" aria-label="${t('Marcar subtarea: {0}', escapeHtml(item.t))}"><span class="ring">${ICONS.check}</span></button>`) +
+    `<span class="sk-t" translate="no">${escapeHtml(item.t)}</span></li>`
+  )).join('')}</ul>`
+  : '');
 
 const itemMarkup = (b, { past, current, sorting }) => {
   const classes = `row${past ? ' past' : ''}${current ? ' cur' : ''}${b.d ? ' done' : ''}`;
@@ -213,12 +232,12 @@ const itemMarkup = (b, { past, current, sorting }) => {
   const trailing = sorting
     ? `<span class="gr" aria-label="Arrastrar para mover">${ICONS.grip}</span>`
     : `<button class="ck" aria-label="Marcar como hecha" aria-pressed="${b.d}"><span class="ring">${ICONS.check}</span></button>`;
-  const color = (CATEGORY_BY_KEY[b.c] || CATEGORY_BY_KEY.rutina).color;
+  const color = catColor(b.c);
   return `<li class="item" data-id="${escapeHtml(b.id)}">` +
     '<button class="swipe-del" tabindex="-1" aria-hidden="true">Eliminar</button>' +
     `<div class="${classes}"${sorting ? '' : ' tabindex="0"'} style="--dot:${color}">` +
     `<span class="t">${toHHMM(b.s)}</span><span class="pt"><i></i></span>` +
-    `<span class="tx"><div class="ti" translate="no">${escapeHtml(b.t)}</div><div class="du">${t('hasta las {0}, {1}', toHHMM(b.e), formatDuration(b.e - b.s))}</div>${itemMeta(b)}${note}</span>` +
+    `<span class="tx"><div class="ti" translate="no">${escapeHtml(b.t)}</div><div class="du">${t('hasta las {0}, {1}', toHHMM(b.e), formatDuration(b.e - b.s))}</div>${itemMeta(b)}${listSubtasksMarkup(b, sorting)}${note}</span>` +
     `${trailing}</div></li>`;
 };
 
@@ -300,15 +319,16 @@ export function repeatsMarkup(rules) {
 
 /* ── Editor y estadísticas ── */
 
-export const categoryChipsMarkup = () => CATEGORIES.map(c => (
-  `<button type="button" class="chip" data-c="${c.key}" style="--dot:${c.color}"><i></i><span translate="no">${escapeHtml(categoryName(c.key))}</span></button>`
+export const categoryChipsMarkup = () => categories.map(c => (
+  `<button type="button" class="chip" data-c="${c.key}" style="--dot:var(--c-${c.key})"><i></i><span translate="no">${escapeHtml(c.label)}</span></button>`
 )).join('');
 
 export const weekRangeLabel = dates => `${formatShortDate(dates[0])} – ${formatShortDate(dates[6])}`;
 
 export function statsMarkup(summary, { empty = 'Sin actividades esta semana.' } = {}) {
-  const rows = CATEGORIES
-    .map(c => ({ ...c, planned: (summary[c.key] || {}).planned || 0, done: (summary[c.key] || {}).done || 0 }))
+  const folded = foldSummary(summary);
+  const rows = summaryCategories()
+    .map(c => ({ ...c, color: c.key === ORPHAN ? 'var(--c-rutina)' : `var(--c-${c.key})`, planned: (folded[c.key] || {}).planned || 0, done: (folded[c.key] || {}).done || 0 }))
     .filter(r => r.planned > 0)
     .sort((a, b) => b.planned - a.planned);
   if (!rows.length) return `<p class="set-s">${escapeHtml(empty)}</p>`;
@@ -319,34 +339,6 @@ export function statsMarkup(summary, { empty = 'Sin actividades esta semana.' } 
       `<div class="stat-h"><span translate="no">${escapeHtml(categoryName(r.key))}</span><span>${t('{0} de {1}', formatTotal(r.done), formatTotal(r.planned))}</span></div>` +
       `<div class="track"><i class="plan" style="width:${(r.planned / max * 100).toFixed(1)}%"></i><i style="width:${(r.done / max * 100).toFixed(1)}%"></i></div></div>`
     ).join('');
-}
-
-/** Selector de etiqueta del editor: «Sin etiqueta» y las propias. */
-export const tagChipsMarkup = (tags, selected) => [{ id: '', name: t('Sin etiqueta') }, ...tags].map(tag => (
-  `<button type="button" class="chip${tag.id === selected ? ' sel' : ''}" data-g="${escapeHtml(tag.id)}" aria-pressed="${tag.id === selected}">` +
-  `${tag.id ? `<span translate="no">${escapeHtml(tag.name)}</span>` : escapeHtml(tag.name)}</button>`
-)).join('');
-
-/** Lista para gestionar etiquetas: nombre editable y botón de eliminar. */
-export const tagManagerMarkup = tags => (tags.length
-  ? '<ul class="tpl-list">' + tags.map(tag => (
-    `<li class="tpl"><label class="f tag-edit"><span class="sr">${escapeHtml(t('Nombre de la etiqueta'))}</span>` +
-    `<input type="text" data-tag-name="${escapeHtml(tag.id)}" maxlength="24" value="${escapeHtml(tag.name)}" autocomplete="off" translate="no"></label>` +
-    `<div class="tpl-b"><button class="btn2 danger" data-act="delete-tag" data-id="${escapeHtml(tag.id)}" aria-label="${t('Eliminar {0}', escapeHtml(tag.name))}">${t('Eliminar')}</button></div></li>`
-  )).join('') + '</ul>'
-  : `<p class="set-s">${t('Aún no tienes etiquetas.')}</p>`);
-
-/** Tiempo por etiqueta en Estadísticas (solo si hay alguna con actividades). */
-export function tagStatsMarkup(summary, tags) {
-  const rows = tags.map(tag => ({ ...tag, planned: (summary[tag.id] || {}).planned || 0, done: (summary[tag.id] || {}).done || 0 }))
-    .filter(r => r.planned > 0).sort((a, b) => b.planned - a.planned);
-  if (!rows.length) return '';
-  const max = rows[0].planned;
-  return `<div class="set-t stats-sub">${t('Por etiqueta')}</div>` + rows.map(r => (
-    `<div class="stat" style="--dot:var(--accent)"><div class="stat-h"><span translate="no">#${escapeHtml(r.name)}</span>` +
-    `<span>${t('{0} de {1}', formatTotal(r.done), formatTotal(r.planned))}</span></div>` +
-    `<div class="track"><i class="plan" style="width:${(r.planned / max * 100).toFixed(1)}%"></i><i style="width:${(r.done / max * 100).toFixed(1)}%"></i></div></div>`
-  )).join('');
 }
 
 /** Navegación entre meses de las estadísticas (mismo aspecto que la de semanas). */
@@ -368,15 +360,14 @@ export const accentSwatchesMarkup = current => ACCENTS.map(a => (
   `<button type="button" class="swatch${a.key === current ? ' sel' : ''}" data-accent="${a.key}" style="--sw:${a.swatch}" aria-pressed="${a.key === current}" aria-label="${a.label}"></button>`
 )).join('');
 
-/** Hoja de categorías: nombre editable y paleta de colores por categoría. */
-export const categoriesMarkup = cats => CATEGORIES.map(c => {
-  const own = cats[c.key] || {};
-  const selected = own.c || DEFAULT_CATEGORY_COLOR[c.key];
+/** Hoja de categorías: nombre editable, paleta de colores y botón de eliminar por categoría. */
+export const categoriesMarkup = list => list.map(c => {
   const swatches = Object.entries(CATEGORY_COLORS).map(([id, hex]) => (
-    `<button type="button" class="swatch sm${id === selected ? ' sel' : ''}" data-cat="${c.key}" data-color="${id}" style="--sw:${hex}" aria-pressed="${id === selected}" aria-label="${escapeHtml(id)}"></button>`
+    `<button type="button" class="swatch sm${id === c.color ? ' sel' : ''}" data-cat="${c.key}" data-color="${id}" style="--sw:${hex}" aria-pressed="${id === c.color}" aria-label="${escapeHtml(id)}"></button>`
   )).join('');
-  return `<div class="cat-row"><label class="f"><span>${escapeHtml(c.label)}</span>` +
-    `<input type="text" data-cat-name="${c.key}" maxlength="20" value="${escapeHtml(own.l || '')}" placeholder="${escapeHtml(c.label)}" autocomplete="off"></label>` +
+  return `<div class="cat-row"><div class="cat-head"><label class="f"><span class="sr">${escapeHtml(t('Nombre de la categoría'))}</span>` +
+    `<input type="text" data-cat-name="${c.key}" maxlength="20" value="${escapeHtml(c.label)}" autocomplete="off" translate="no"></label>` +
+    `<button type="button" class="btn2 danger" data-act="del-cat" data-cat="${c.key}" aria-label="${t('Eliminar {0}', escapeHtml(c.label))}">${t('Eliminar')}</button></div>` +
     `<div class="swatches" role="group" aria-label="${t('Color de {0}', escapeHtml(c.label))}">${swatches}</div></div>`;
 }).join('');
 

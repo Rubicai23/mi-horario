@@ -2,7 +2,6 @@
  * weekly-ui.js — Resumen automático de la semana pasada. Es opcional (apagado por defecto): solo aparece
  * al abrir la app en una semana nueva, una vez por semana, y únicamente si la semana anterior tuvo actividades.
  */
-import { CATEGORIES } from './config.js';
 import { buildShareText, weeklyDue } from './summary.js';
 import { shareText } from './platform.js';
 import * as ui from './ui-components.js';
@@ -44,8 +43,8 @@ export function setupWeekly(ctx) {
   $('weeklyShare').addEventListener('click', async () => {
     if (!current) return;
     const text = buildShareText({
-      summary: current.summary, range: current.range, streak: state.streakView(ctx.clock()).current,
-      categories: CATEGORIES, nameOf: ui.categoryName
+      summary: ui.foldSummary(current.summary), range: current.range, streak: state.streakView(ctx.clock()).current,
+      categories: ui.summaryCategories(), nameOf: ui.categoryName
     });
     try {
       if ((await shareText(text)) === 'copied') ctx.toast.show('Resumen copiado. Pégalo donde quieras.');

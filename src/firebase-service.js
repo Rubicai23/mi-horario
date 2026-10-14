@@ -16,7 +16,7 @@ import {
 } from 'firebase/auth';
 import {
   arrayUnion, collection, deleteDoc, doc, getDocsFromServer, initializeFirestore, memoryLocalCache, onSnapshot, persistentLocalCache,
-  persistentMultipleTabManager, persistentSingleTabManager, serverTimestamp, setDoc, writeBatch
+  persistentMultipleTabManager, persistentSingleTabManager, query, serverTimestamp, setDoc, updateDoc, where, writeBatch
 } from 'firebase/firestore';
 
 const AUTH_MESSAGES = Object.freeze({
@@ -184,7 +184,8 @@ export function createCloudService({ config, native = false }) {
       try {
         stopListeners();
         const snapshot = await getDocsFromServer(collection(db, 'users', uid, 'days'));
-        const refs = snapshot.docs.map(d => d.ref).concat(profileRef(uid), doc(db, 'pushQueue', uid));
+        const feeds = await getDocsFromServer(query(collection(db, 'calendarFeeds'), where('uid', '==', uid)));
+        const refs = snapshot.docs.map(d => d.ref).concat(profileRef(uid), doc(db, 'pushQueue', uid), feeds.docs.map(d => d.ref));
         for (let i = 0; i < refs.length; i += 400) {
           const batch = writeBatch(db);
           refs.slice(i, i + 400).forEach(ref => batch.delete(ref));
@@ -229,7 +230,6 @@ export function createCloudService({ config, native = false }) {
           streak: JSON.parse(JSON.stringify(profile.streak || { goal: 80, days: [0, 1, 2, 3, 4, 5, 6] })),
           badges: JSON.parse(JSON.stringify(profile.badges || {})),
           cats: JSON.parse(JSON.stringify(profile.cats || {})),
-          tags: JSON.parse(JSON.stringify(profile.tags || [])),
           updatedAt: serverTimestamp()
         });
         return true;
@@ -261,6 +261,37 @@ export function createCloudService({ config, native = false }) {
     async disablePush() {
       if (!db || !user) return false;
       try { await deleteDoc(doc(db, 'pushQueue', user.uid)); return true; } catch (error) { handlers.error(error); return false; }
+    },
+    /* ── Calendario suscrito: enlace secreto (calendarFeeds/{token}) que lee la función de la nube ── */
+    async getFeed() {
+      if (!db || !user) return null;
+      try {
+        const snap = await getDocsFromServer(query(collection(db, 'calendarFeeds'), where('uid', '==', user.uid)));
+        const first = snap.docs[0];
+        return first ? { token: first.id, alarm: Number.isInteger(first.data().alarm) ? first.data().alarm : -1 } : null;
+      } catch (error) { handlers.error(error); throw error; }
+    },
+    async createFeed(alarm) {
+      if (!db || !user) throw new Error('No hay una sesión iniciada.');
+      const old = await getDocsFromServer(query(collection(db, 'calendarFeeds'), where('uid', '==', user.uid)));
+      const bytes = new Uint8Array(24);
+      crypto.getRandomValues(bytes);
+      const token = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_');
+      await setDoc(doc(db, 'calendarFeeds', token), { uid: user.uid, alarm, createdAt: serverTimestamp() });
+      await Promise.all(old.docs.map(d => deleteDoc(d.ref)));   // el enlace anterior deja de funcionar
+      return token;
+    },
+    async setFeedAlarm(token, alarm) {
+      if (!db || !user) return false;
+      try { await updateDoc(doc(db, 'calendarFeeds', token), { alarm }); return true; } catch (error) { handlers.error(error); return false; }
+    },
+    async deleteFeed() {
+      if (!db || !user) return false;
+      try {
+        const old = await getDocsFromServer(query(collection(db, 'calendarFeeds'), where('uid', '==', user.uid)));
+        await Promise.all(old.docs.map(d => deleteDoc(d.ref)));
+        return true;
+      } catch (error) { handlers.error(error); return false; }
     },
     async removeDay(key) {
       if (!db || !user) return false;

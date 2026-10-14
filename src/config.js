@@ -27,10 +27,9 @@ export const LIMITS = Object.freeze({
   subtaskLength: 60,
   restDays: 400,                        // debe coincidir con firestore.rules
   badges: 40,                           // debe coincidir con firestore.rules
-  categories: 6,                        // debe coincidir con firestore.rules (un ajuste por categoría)
+  categories: 20,                       // categorías activas como máximo; firestore.rules admite 20 + las 6 iniciales (26)
   categoryLabel: 20,
-  tags: 12,                             // debe coincidir con firestore.rules
-  tagName: 24
+
 });
 
 /** Meses que se pueden recorrer en las estadísticas (hacia atrás y hacia delante desde el actual). */
@@ -79,7 +78,10 @@ export const NOTIFICATIONS = Object.freeze({
 
 /** Avisos con la app cerrada (Web Push vía Firebase Cloud Messaging). Vacío = función oculta.
  *  Se rellena con la clave de Firebase → Configuración → Cloud Messaging → Certificados push web → "Par de claves". */
-export const PUSH = Object.freeze({ vapidKey: 'BEBFB-SCQcLo7cPFDC14HQ7gsst0CssqVk629VTzJZdXo0ID5fgZIvSqpBKiszzCFw5088Q7oaHrGBDDKFveGxM', horizonDays: 3, maxItems: 40 });
+export const PUSH = Object.freeze({ vapidKey: '', horizonDays: 3, maxItems: 40 });
+
+/** Función de la nube que publica el calendario suscrito (functions/index.js → calendarFeed). */
+export const CALENDAR_FEED = Object.freeze({ region: 'europe-west1', name: 'calendarFeed', refreshMinutes: 15 });
 
 export const BACKUP = Object.freeze({ app: 'mi-horario', version: 1 });
 

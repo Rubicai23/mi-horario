@@ -1,44 +1,59 @@
-# Avisos con la app cerrada (iPhone) — guía paso a paso
+# Nube de "Mi horario": avisos con la app cerrada y calendario conectado
 
 **Importante:** esta parte no se ha podido probar de extremo a extremo (necesita tu proyecto real de Firebase).
-La app y la función están escritas y la lógica probada, pero puede que haya que ajustar algo al probarlo.
-Requisitos: iPhone con iOS 16.4 o superior y la app **añadida a la pantalla de inicio** (Safari → Compartir → Añadir a pantalla de inicio).
+La lógica y las pantallas están probadas con Firebase simulado, pero puede que haya que ajustar algo al desplegar.
 
-## 1. Plan Blaze (obligatorio)
-Las funciones programadas de Firebase exigen el plan **Blaze** (hay que poner una tarjeta). Para uso personal el gasto
-suele ser 0 € (hay una cuota gratuita mensual), pero conviene crear una **alerta de presupuesto** de 1 € en
-Google Cloud → Facturación → Presupuestos y alertas.
+Incluye dos funciones en la nube (carpeta `functions`):
+- `sendDueReminders`: envía los avisos con la app cerrada (iPhone con iOS 16.4+ y la app en la pantalla de inicio).
+- `calendarFeed`: sirve un calendario por enlace secreto para suscribirlo en el Calendario del iPhone o en Google Calendar.
 
-## 2. Clave web push
+## 1. Plan Blaze
+Ya activado. Pon una **alerta de presupuesto** de 1 € en Google Cloud → Facturación → Presupuestos y alertas
+(solo avisa, no corta el gasto). Mira Facturación los primeros días: debe poner 0,00 €.
+
+## 2. Clave web push (solo para los avisos con la app cerrada)
 Firebase → ⚙ Configuración del proyecto → **Cloud Messaging** → *Certificados push web* → **Generar par de claves**.
-Copia la clave larga y pégala en `src/config.js`:
+Pégala en `src/config.js`:
 ```js
 export const PUSH = Object.freeze({ vapidKey: 'AQUÍ_TU_CLAVE', horizonDays: 3, maxItems: 40 });
 ```
 
-## 3. Publicar reglas y función (en tu PC, en la carpeta del proyecto)
+## 3. Publicar reglas y funciones (en tu PC, en la carpeta del proyecto)
 ```
 npm install -g firebase-tools
 firebase login
 firebase use mi-horario-5e8b1
-cd functions && npm install && cd ..
+cd functions
+npm install
+cd ..
 firebase deploy --only firestore:rules,functions
 ```
+- Si pregunta si activar APIs (Cloud Build, Cloud Scheduler, Artifact Registry, Cloud Run), di **sí**.
+- Si pregunta por la política de limpieza de imágenes, escribe **1** (borrar las antiguas tras 1 día).
+- Debe acabar con **Deploy complete!** (hay dos funciones: `sendDueReminders` y `calendarFeed`).
 
 ## 4. Subir la app a GitHub como siempre
-Después, en el iPhone: Ajustes de la app → **Avisos con la app cerrada** → activar → aceptar el permiso.
+(sin la carpeta `functions/node_modules`).
 
-## Cómo funciona
-La app guarda en la nube la hora y el título de tus próximas actividades (3 días). Una función se ejecuta cada minuto
-y envía la notificación a su hora. Es opcional: si no activas el ajuste, no se guarda nada. Al borrar la cuenta se borra también.
+## 5. Activar en el iPhone
+- **Avisos con la app cerrada:** Ajustes → *Avisos con la app cerrada*.
+- **Calendario conectado:** ☰ → *Conectar con mi calendario* → *Crear mi enlace* → *Añadir al Calendario del iPhone*
+  (o *Añadir a Google Calendar*). Se añade una sola vez y después se actualiza solo.
+
+## Cómo funciona el calendario conectado
+El enlace es secreto (32 caracteres al azar). La función lee tus actividades y las publica como calendario de solo lectura.
+Apple Calendar lo actualiza cada pocos minutos; Google Calendar cada 12-24 horas (no se puede acelerar).
+Con *Crear un enlace nuevo* el anterior deja de funcionar; con *Desactivar* se borra.
+Los avisos del calendario se eligen en la pantalla del enlace. Google Calendar ignora los avisos del archivo:
+en Google hay que ponerlos en los ajustes de ese calendario.
+
+## Medidas de seguridad de gasto
+- Las funciones limitan `maxInstances` (1 para avisos, 3 para el calendario).
+- Alerta de presupuesto de 1 € (50 %, 90 %, 100 %).
+- Política de limpieza de imágenes de 1 día.
 
 ## Si algo falla
-- No aparece el ajuste: falta la clave del paso 2, o no has iniciado sesión.
-- "No se pudo activar": abre la app desde el icono de la pantalla de inicio (no desde Safari).
-- No llegan avisos: en Firebase → Functions → Registros mira si `sendDueReminders` da errores y envíame el texto.
-
-## Medidas de seguridad de gasto (recomendadas)
-- La función ya limita `maxInstances: 1` y 256 MiB.
-- Alerta de presupuesto de 1 € (50 %, 90 %, 100 %) en Google Cloud → Facturación → Presupuestos y alertas. Solo avisa, no corta.
-- Al desplegar, elige borrar imágenes antiguas tras 1 día (política de limpieza de Artifact Registry).
-- Revisa Facturación los primeros días.
+- No aparece el ajuste de avisos: falta la clave (paso 2), o no has iniciado sesión.
+- "No se pudo leer/crear tu enlace": publica las reglas (paso 3) y comprueba la conexión.
+- El enlace da error 404: las funciones no están desplegadas, o el enlace se regeneró.
+- Mira Firebase → Functions → Registros y envía el texto de los errores.
