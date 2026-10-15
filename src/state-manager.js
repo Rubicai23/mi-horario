@@ -5,8 +5,9 @@
  * este módulo se puede probar con `node --test`.
  *
  * Modelo de una actividad:
- *   { id, s, e, t, c, n, d, p? }
+ *   { id, s, e, t, c, n, d, p?, k?, r?, w? }
  *   s/e = minutos desde medianoche · t = título · c = categoría · n = nota · d = hecha · p = plantilla de origen
+ *   k = subtareas · r = repetición semanal de origen · w = segundos de tiempo real medidos con el cronómetro
  *
  * Los días son inmutables (arrays congelados): cada cambio crea un array nuevo.
  */
@@ -17,6 +18,7 @@ import {
   addDays, diffDays, fromHHMM, isDateKey, parseDateKey, startOfDay, toDateKey, toHHMM, uid, weekDates
 } from './utils.js';
 import { t as translate } from './i18n.js';
+import { searchDays } from './search.js';
 
 const CATEGORY_KEYS = new Set(CATEGORIES.map(c => c.key));
 const CUSTOM_CAT_RE = /^u[a-z0-9]{1,12}$/;
@@ -35,6 +37,7 @@ const BACKUP_SETTINGS = Object.freeze({
 });
 const BACKUP_SETTING_KEYS = Object.freeze(Object.keys(BACKUP_SETTINGS));
 const RULE_ID_RE = /^r[a-z0-9]{1,20}$/;
+const MAX_TRACKED = 86400;   // un día entero, en segundos
 
 export const EMPTY_DAY = Object.freeze([]);
 export const byStart = (a, b) => a.s - b.s || a.e - b.e;
@@ -71,6 +74,8 @@ export function sanitizeBlock(raw) {
   const k = sanitizeSubtasks(raw.k);
   if (k.length) block.k = k;
   if (typeof raw.r === 'string' && RULE_ID_RE.test(raw.r)) block.r = raw.r;   // regla semanal de la que procede
+  const w = Math.round(Number(raw.w));
+  if (w >= 1) block.w = Math.min(w, MAX_TRACKED);                              // tiempo real medido (segundos)
   return block;
 }
 
@@ -390,12 +395,16 @@ export function describeDay(blocks, nowMin) {
   return upcoming ? { kind: 'upcoming', block: upcoming, index: -1 } : { kind: 'finished', index: -1 };
 }
 
-/** Minutos planificados y hechos por categoría. */
+/** Minutos planificados y hechos por categoría (y `real` = minutos medidos con el cronómetro, si los hay). */
 export function summarizeWeek(blocksPerDay) {
   return blocksPerDay.reduce((all, day) => all.concat(day), []).reduce((acc, b) => {
     const entry = acc[b.c] || (acc[b.c] = { planned: 0, done: 0 });
     entry.planned += b.e - b.s;
     if (b.d) entry.done += b.e - b.s;
+    if (b.w) {                                              // solo aparece si se midió algo
+      entry.real = (entry.real || 0) + b.w / 60;
+      entry.realPlan = (entry.realPlan || 0) + (b.e - b.s);   // lo planificado de esas mismas actividades
+    }
     return acc;
   }, {});
 }
@@ -449,6 +458,25 @@ export function placeBlocks(existing, candidates) {
     occupied.push(block);
   });
   return { added, skipped };
+}
+
+/**
+ * Primera hora de inicio libre para una actividad de `length` minutos: la más cercana a `from` hacia delante y,
+ * si no cabe, la primera de todo el día. null si no cabe en ningún sitio.
+ */
+export function findFreeSlot(blocks, length, from = 0) {
+  const fits = start => start + length <= MAX_MIN;
+  const scan = begin => {
+    let pos = Math.max(0, begin);
+    while (fits(pos)) {
+      const clash = findOverlaps(blocks, { s: pos, e: pos + length });
+      if (!clash.length) return pos;
+      pos = Math.max(...clash.map(b => b.e));
+    }
+    return null;
+  };
+  const forward = scan(from);
+  return forward !== null ? forward : (from > 0 ? scan(0) : null);
 }
 
 /** Crea las actividades de una plantilla saltándose las que se solapan con las existentes. */
@@ -769,7 +797,7 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
     };
   };
 
-  const FIELDS = ['t', 's', 'e', 'c', 'n', 'k', 'g'];
+  const FIELDS = ['t', 's', 'e', 'c', 'n', 'k', 'w'];
   const pickFields = patch => Object.fromEntries(FIELDS.filter(f => f in patch).map(f => [f, patch[f]]));
 
   const api = {
@@ -892,7 +920,7 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
         const current = load(key);
         const base = replace ? [] : current;
         const candidates = source.map(b => sanitizeBlock({
-          ...b, id: uid(), d: false, n: '', r: undefined, k: (b.k || []).map(item => ({ t: item.t, d: false }))
+          ...b, id: uid(), d: false, n: '', r: undefined, w: undefined, k: (b.k || []).map(item => ({ t: item.t, d: false }))
         }));
         const placed = placeBlocks(base, candidates);
         const usable = placed.added.slice(0, Math.max(0, LIMITS.blocksPerDay - base.length));
@@ -911,6 +939,107 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
       previous.forEach(([key, blocks]) => {
         if (blocks.length) api.restoreDay(key, blocks);
         else api.clearDay(key);
+      });
+    },
+
+    /**
+     * Mueve una actividad a otro día (o, con `copy`, deja una copia sin marcar y sin anotaciones).
+     * La actividad conserva sus horas; si choca con otra del día de destino, se avisa en `overlaps`.
+     * Devuelve `undo()` para dejarlo todo como estaba.
+     */
+    moveBlock(fromKey, id, toKey, { copy = false } = {}) {
+      assertDateKey(fromKey);
+      assertDateKey(toKey);
+      if (fromKey === toKey) return { ok: false, error: 'Elige otro día distinto.' };
+      const source = load(fromKey);
+      const block = source.find(b => b.id === id);
+      if (!block) return { ok: false, error: 'La actividad ya no existe.' };
+      const target = load(toKey);
+      if (target.length >= LIMITS.blocksPerDay) return { ok: false, error: `Ese día ya tiene ${LIMITS.blocksPerDay} actividades.` };
+      const base = copy
+        ? { ...block, d: false, n: '', w: undefined, k: (block.k || []).map(item => ({ t: item.t, d: false })) }
+        : { ...block };
+      const moved = sanitizeBlock({ ...base, id: uid(), r: undefined });
+      if (!moved) return { ok: false, error: 'La actividad no es válida.' };
+      const overlaps = findOverlaps(target, moved).length;
+      commit(toKey, [...target, moved]);
+      if (!copy) setDayBlocks(fromKey, source.filter(b => b.id !== id));
+      const snapshots = copy ? [[toKey, target]] : [[fromKey, source], [toKey, target]];
+      return { ok: true, block: moved, overlaps, copy, undo: () => api.undoCopy(snapshots) };
+    },
+
+    /**
+     * Pasa las actividades sin hacer de un día a otro.
+     * - Desde hoy o un día futuro se MUEVEN (se reprograman).
+     * - Desde un día pasado se COPIAN: el original se queda como estaba y la racha de ese día no cambia.
+     * Cada una conserva su hora; si esa hora está ocupada, va al primer hueco libre (o se solapa si no cabe).
+     */
+    carryOver(fromKey, toKey, { onlyOver = null } = {}) {
+      assertDateKey(fromKey);
+      assertDateKey(toKey);
+      if (fromKey === toKey) return { ok: false, error: 'Elige otro día distinto.' };
+      const source = load(fromKey);
+      const pending = source.filter(b => !b.d && (onlyOver === null || b.e <= onlyOver));
+      if (!pending.length) return { ok: false, error: 'No hay actividades pendientes.' };
+      const copy = fromKey < todayKey();
+      const target = load(toKey);
+      const room = LIMITS.blocksPerDay - target.length;
+      if (room <= 0) return { ok: false, error: `Ese día ya tiene ${LIMITS.blocksPerDay} actividades.` };
+      const taking = pending.slice(0, room);
+      const occupied = target.slice();
+      const placed = [];
+      let shifted = 0;
+      let overlapped = 0;
+      taking.forEach(b => {
+        const length = b.e - b.s;
+        const slot = findFreeSlot(occupied, length, b.s);
+        const s = slot === null ? b.s : slot;
+        if (slot === null) overlapped += 1;
+        else if (slot !== b.s) shifted += 1;
+        const base = copy
+          ? { ...b, w: undefined, n: '', k: (b.k || []).map(item => ({ t: item.t, d: false })) }
+          : { ...b };
+        const next = sanitizeBlock({ ...base, id: uid(), s, e: s + length, d: false, r: undefined });
+        if (!next) return;
+        occupied.push(next);
+        placed.push(next);
+      });
+      if (!placed.length) return { ok: false, error: 'No se pudo pasar nada.' };
+      commit(toKey, [...target, ...placed]);
+      if (!copy) {
+        const moved = new Set(taking.map(b => b.id));
+        setDayBlocks(fromKey, source.filter(b => !moved.has(b.id)));
+      }
+      const snapshots = copy ? [[toKey, target]] : [[fromKey, source], [toKey, target]];
+      return {
+        ok: true, moved: placed.length, left: pending.length - taking.length, shifted, overlapped, copy,
+        undo: () => api.undoCopy(snapshots)
+      };
+    },
+
+    /** Suma segundos de tiempo real a una actividad (cronómetro). Devuelve `undo()`. */
+    addTracked(key, id, seconds) {
+      assertDateKey(key);
+      const block = load(key).find(b => b.id === id);
+      const add = Math.round(Number(seconds));
+      if (!block || !(add >= 1)) return { ok: false };
+      const before = block.w || 0;
+      const result = api.updateBlock(key, id, { w: before + add });
+      if (!result.ok) return result;
+      return { ok: true, total: result.block.w || 0, undo: () => api.updateBlock(key, id, { w: before }) };
+    },
+
+    /** Busca en todos los días guardados (y en las repeticiones semanales vigentes). */
+    search(query, filters = {}, limit = 80) {
+      const labels = new Map(api.listCategories().map(c => [c.key, c.label]));
+      return searchDays({
+        days: storedKeys().map(key => [key, load(key)]),
+        rules: loadProfile().recurring,
+        query,
+        categoryLabel: key => labels.get(key) || translate('Sin categoría'),
+        filters,
+        today: todayKey(),
+        limit
       });
     },
 

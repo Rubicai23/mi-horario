@@ -8,8 +8,11 @@
 import { t } from './i18n.js';
 import { ACCENTS, CATEGORY_COLORS, DAY_LETTERS, DAY_NAMES, THEMES } from './config.js';
 import {
-  addDays, escapeHtml, formatDuration, formatLongDate, formatShortDate, formatTotal, pad, parseDateKey, plural, toDateKey, toHHMM
+  addDays, diffDays, escapeHtml, formatDuration, formatLongDate, formatShortDate, formatTotal, pad, parseDateKey, plural, toDateKey, toHHMM
 } from './utils.js';
+import { formatStopwatch, formatTracked } from './tracker.js';
+import { highlightRanges } from './search.js';
+import { axisTicks, barGeometry, busyMinutes, longestGap, nowPosition } from './weekview.js';
 
 export const $ = id => document.getElementById(id);
 
@@ -30,6 +33,7 @@ export const foldSummary = summary => {
     const entry = acc[k] || (acc[k] = { planned: 0, done: 0 });
     entry.planned += value.planned || 0;
     entry.done += value.done || 0;
+    if (value.real) { entry.real = (entry.real || 0) + value.real; entry.realPlan = (entry.realPlan || 0) + (value.realPlan || 0); }
     return acc;
   }, {});
 };
@@ -48,6 +52,8 @@ export const ICONS = Object.freeze({
   copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/></svg>',
   repeat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2.5l3 3-3 3"/><path d="M4 11.5v-2a4 4 0 0 1 4-4h12"/><path d="M7 21.5l-3-3 3-3"/><path d="M20 12.5v2a4 4 0 0 1-4 4H4"/></svg>',
   moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>',
+  play: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 2.2v7.6L9.6 6z" fill="currentColor" stroke="none"/></svg>',
+  stop: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.6" y="2.6" width="6.8" height="6.8" rx="1.2" fill="currentColor" stroke="none"/></svg>',
   left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6L8.5 12l6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 });
@@ -224,7 +230,21 @@ const listSubtasksMarkup = (b, sorting) => (b.k && b.k.length
   )).join('')}</ul>`
   : '');
 
-const itemMarkup = (b, { past, current, sorting }) => {
+/** Cronómetro de la actividad: botón de medir/parar y el tiempo real ya medido. `track` = { id, seconds, can }. */
+const trackMarkup = (b, track, sorting) => {
+  if (sorting || !track) return '';
+  const running = track.id === b.id;
+  const parts = [];
+  if (running) {
+    parts.push(`<button type="button" class="trk-btn on" data-act="track" aria-label="${t('Parar el cronómetro de {0}', escapeHtml(b.t))}">${ICONS.stop}<span>${t('Parar')}</span><b class="trk-live" data-live>${formatStopwatch(track.seconds)}</b></button>`);
+  } else if (track.can && !b.d) {
+    parts.push(`<button type="button" class="trk-btn" data-act="track" aria-label="${t('Medir el tiempo de {0}', escapeHtml(b.t))}">${ICONS.play}<span>${b.w ? t('Seguir midiendo') : t('Medir tiempo')}</span></button>`);
+  }
+  if (b.w) parts.push(`<span class="mt trk-real">${t('Real: {0} · plan: {1}', formatTracked(b.w), formatDuration(b.e - b.s))}</span>`);
+  return parts.length ? `<div class="trk">${parts.join('')}</div>` : '';
+};
+
+const itemMarkup = (b, { past, current, sorting, track }) => {
   const classes = `row${past ? ' past' : ''}${current ? ' cur' : ''}${b.d ? ' done' : ''}`;
   let note = '';
   if (b.n) note = `<div class="no" translate="no">${escapeHtml(b.n)}</div>`;
@@ -237,16 +257,17 @@ const itemMarkup = (b, { past, current, sorting }) => {
     '<button class="swipe-del" tabindex="-1" aria-hidden="true">Eliminar</button>' +
     `<div class="${classes}"${sorting ? '' : ' tabindex="0"'} style="--dot:${color}">` +
     `<span class="t">${toHHMM(b.s)}</span><span class="pt"><i></i></span>` +
-    `<span class="tx"><div class="ti" translate="no">${escapeHtml(b.t)}</div><div class="du">${t('hasta las {0}, {1}', toHHMM(b.e), formatDuration(b.e - b.s))}</div>${itemMeta(b)}${listSubtasksMarkup(b, sorting)}${note}</span>` +
+    `<span class="tx"><div class="ti" translate="no">${escapeHtml(b.t)}</div><div class="du">${t('hasta las {0}, {1}', toHHMM(b.e), formatDuration(b.e - b.s))}</div>${itemMeta(b)}${trackMarkup(b, track, sorting)}${listSubtasksMarkup(b, sorting)}${note}</span>` +
     `${trailing}</div></li>`;
 };
 
-export function listMarkup({ blocks, isToday, nowMin, currentIndex, sorting, presets, welcome }) {
+export function listMarkup({ blocks, isToday, nowMin, currentIndex, sorting, presets, welcome, track = null }) {
   if (!blocks.length) return onboardingMarkup({ presets: presets.filter(p => !p.used), welcome });
   return blocks.map((b, i) => itemMarkup(b, {
     past: isToday && nowMin >= b.e,
     current: isToday && i === currentIndex,
-    sorting
+    sorting,
+    track
   })).join('');
 }
 
@@ -325,20 +346,145 @@ export const categoryChipsMarkup = () => categories.map(c => (
 
 export const weekRangeLabel = dates => `${formatShortDate(dates[0])} – ${formatShortDate(dates[6])}`;
 
+/** Tiempo medido con el cronómetro frente a lo planificado en esas mismas actividades. */
+function realTotalMarkup({ real, plan }) {
+  if (real <= 0 || plan <= 0) return '';
+  const pct = Math.round((real / plan - 1) * 100);
+  const verdict = Math.abs(pct) < 3 ? t('Vas justo con lo planificado.')
+    : pct > 0 ? t('Tardas un {0} % más de lo planificado.', pct) : t('Tardas un {0} % menos de lo planificado.', -pct);
+  return `<p class="stat-real-total"><b>${t('Con el cronómetro: {0} reales frente a {1} planificados.', formatTotal(real), formatTotal(plan))}</b> ${verdict}</p>`;
+}
+
 export function statsMarkup(summary, { empty = 'Sin actividades esta semana.' } = {}) {
   const folded = foldSummary(summary);
   const rows = summaryCategories()
-    .map(c => ({ ...c, color: c.key === ORPHAN ? 'var(--c-rutina)' : `var(--c-${c.key})`, planned: (folded[c.key] || {}).planned || 0, done: (folded[c.key] || {}).done || 0 }))
+    .map(c => ({ ...c, color: c.key === ORPHAN ? 'var(--c-rutina)' : `var(--c-${c.key})`, planned: (folded[c.key] || {}).planned || 0, done: (folded[c.key] || {}).done || 0, real: (folded[c.key] || {}).real || 0, realPlan: (folded[c.key] || {}).realPlan || 0 }))
     .filter(r => r.planned > 0)
     .sort((a, b) => b.planned - a.planned);
   if (!rows.length) return `<p class="set-s">${escapeHtml(empty)}</p>`;
   const max = rows[0].planned;
   const total = rows.reduce((t, r) => ({ planned: t.planned + r.planned, done: t.done + r.done }), { planned: 0, done: 0 });
+  const measured = rows.reduce((t, r) => ({ real: t.real + (r.real || 0), plan: t.plan + (r.realPlan || 0) }), { real: 0, plan: 0 });
   return `<div class="stat-total"><b>${formatTotal(total.done)}</b>${t('hechas de {0} planificadas', formatTotal(total.planned))}</div>` +
+    realTotalMarkup(measured) +
     rows.map(r => `<div class="stat" style="--dot:${r.color}">` +
       `<div class="stat-h"><span translate="no">${escapeHtml(categoryName(r.key))}</span><span>${t('{0} de {1}', formatTotal(r.done), formatTotal(r.planned))}</span></div>` +
-      `<div class="track"><i class="plan" style="width:${(r.planned / max * 100).toFixed(1)}%"></i><i style="width:${(r.done / max * 100).toFixed(1)}%"></i></div></div>`
+      `<div class="track"><i class="plan" style="width:${(r.planned / max * 100).toFixed(1)}%"></i><i style="width:${(r.done / max * 100).toFixed(1)}%"></i></div>` +
+      (r.real ? `<div class="stat-real">${t('Medido: {0} reales · {1} planificados', formatTotal(r.real), formatTotal(r.realPlan))}</div>` : '') +
+      '</div>'
     ).join('');
+}
+
+/* ── Vista de semana ── */
+
+/**
+ * @param {{ days: Array<{date: Date, key: string, blocks: Array, isToday: boolean, isRest: boolean}>,
+ *           range: {from:number,to:number}, nowMin: number }} p
+ */
+export function weekViewMarkup({ days, range, nowMin }) {
+  const all = days.flatMap(d => d.blocks);
+  const done = all.filter(b => b.d).length;
+  const planned = days.reduce((sum, d) => sum + busyMinutes(d.blocks), 0);
+  const ticks = axisTicks(range);
+  const axis = `<div class="wv-axis" aria-hidden="true">${ticks.map(m => (
+    `<span style="left:${(((m - range.from) / (range.to - range.from)) * 100).toFixed(2)}%">${m / 60}</span>`)).join('')}</div>`;
+  const summary = all.length
+    ? t('{0} · {1} planificadas · {2} hechas', plural(all.length, 'actividad', 'actividades'), formatTotal(planned), done)
+    : t('No hay actividades esta semana. Toca un día para añadirlas.');
+  const cards = days.map(day => {
+    const { date, key, blocks, isToday, isRest } = day;
+    const name = `${DAY_NAMES[date.getDay()]} ${date.getDate()}`;
+    const doneCount = blocks.filter(b => b.d).length;
+    const head = blocks.length
+      ? `${plural(blocks.length, 'actividad', 'actividades')} · ${formatTotal(busyMinutes(blocks))}`
+      : (isRest ? t('Día de descanso') : t('Libre'));
+    const bar = `<span class="wv-bar" aria-hidden="true">` +
+      ticks.map(m => `<i class="wv-tick" style="left:${(((m - range.from) / (range.to - range.from)) * 100).toFixed(2)}%"></i>`).join('') +
+      blocks.map(b => {
+        const g = barGeometry(b, range);
+        return `<i class="wv-seg${b.d ? ' done' : ''}" style="left:${g.left.toFixed(2)}%;width:${g.width.toFixed(2)}%;--dot:${catColor(b.c)}"></i>`;
+      }).join('') +
+      (isToday && nowPosition(nowMin, range) !== null ? `<i class="wv-now" style="left:${nowPosition(nowMin, range).toFixed(2)}%"></i>` : '') +
+      '</span>';
+    const shown = blocks.slice(0, 3);
+    const lines = shown.map(b => (
+      `<span class="wv-l${b.d ? ' done' : ''}" style="--dot:${catColor(b.c)}"><i></i><em>${toHHMM(b.s)}</em><span translate="no">${escapeHtml(b.t)}</span></span>`
+    )).join('') + (blocks.length > shown.length ? `<span class="wv-more">${t('+{0} más', blocks.length - shown.length)}</span>` : '');
+    const gap = longestGap(blocks);
+    const gapLine = gap && gap.length >= 60
+      ? `<span class="wv-gap">${t('Mayor hueco libre: {0} ({1}–{2})', formatDuration(gap.length), toHHMM(gap.from), toHHMM(gap.to))}</span>` : '';
+    const label = `${name}: ${blocks.length ? `${plural(blocks.length, 'actividad', 'actividades')}, ${t('{0} de {1}', doneCount, blocks.length)}` : head}. ${t('Abrir el día')}`;
+    return `<li><button type="button" class="wv-day${isToday ? ' today' : ''}${isRest ? ' rest' : ''}" data-dow="${date.getDay()}" data-key="${key}" aria-label="${escapeHtml(label)}">` +
+      `<span class="wv-h"><b>${name}${isToday ? ` · ${t('Hoy')}` : ''}</b><small>${head}</small>` +
+      (blocks.length ? `<i class="wv-prog${doneCount === blocks.length ? ' all' : ''}">${doneCount}/${blocks.length}</i>` : '') + '</span>' +
+      bar + (lines ? `<span class="wv-lines">${lines}</span>` : '') + gapLine + '</button></li>';
+  }).join('');
+  return `<p class="wv-sum">${summary}</p>${axis}<ul class="wv-days">${cards}</ul>`;
+}
+
+/* ── Aviso de pendientes ── */
+
+export function carryMarkup({ count, past, target }) {
+  const text = past
+    ? t('Quedaron {0} sin hacer este día.', plural(count, 'actividad', 'actividades'))
+    : t('Te quedan {0} sin hacer.', plural(count, 'actividad', 'actividades'));
+  return `<span class="carry-t">${text}</span>` +
+    `<button type="button" class="btn2" id="carryGo">${past ? t('Traer a hoy') : t('Pasar a {0}', target)}</button>` +
+    `<button type="button" class="carry-x" id="carryHide" aria-label="${t('Ocultar este aviso')}">×</button>`;
+}
+
+/* ── Buscador ── */
+
+/** Texto con las coincidencias resaltadas (todo escapado). */
+export function highlightMarkup(text, terms) {
+  const ranges = highlightRanges(text, terms);
+  if (!ranges.length) return escapeHtml(text);
+  let out = '';
+  let at = 0;
+  ranges.forEach(([from, to]) => {
+    out += escapeHtml(text.slice(at, from)) + `<mark>${escapeHtml(text.slice(from, to))}</mark>`;
+    at = to;
+  });
+  return out + escapeHtml(text.slice(at));
+}
+
+/** Fragmento de un texto largo alrededor de la primera coincidencia. */
+function snippet(text, terms) {
+  const ranges = highlightRanges(text, terms);
+  if (!ranges.length || text.length <= 70) return text.length > 90 ? `${text.slice(0, 90)}…` : text;
+  const start = Math.max(0, ranges[0][0] - 25);
+  return (start > 0 ? '…' : '') + text.slice(start, start + 90) + (start + 90 < text.length ? '…' : '');
+}
+
+const relativeDay = diff => {
+  if (diff === 0) return t('Hoy');
+  if (diff === 1) return t('Mañana');
+  if (diff === -1) return t('Ayer');
+  return diff > 0 ? t('En {0} días', diff) : t('Hace {0} días', -diff);
+};
+
+/** Resultados de la búsqueda, con lo próximo primero. `inRange(key)` dice si la fecha se puede abrir en la app. */
+export function searchResultsMarkup({ found, today, inRange }) {
+  const { results, rules, terms, upcomingCount } = found;
+  const item = ({ key, block, fields }) => {
+    const date = parseDateKey(key);
+    const when = relativeDay(diffDays(today, date));
+    const extra = fields.includes('n') && block.n ? `<span class="sr-s" translate="no">${highlightMarkup(snippet(block.n, terms), terms)}</span>`
+      : fields.includes('k') && !fields.includes('t') ? `<span class="sr-s" translate="no">${highlightMarkup(snippet((block.k || []).map(k => k.t).join(' · '), terms), terms)}</span>` : '';
+    return `<li><button type="button" class="sr-item${block.d ? ' done' : ''}" data-key="${key}" data-id="${escapeHtml(block.id)}"${inRange(key) ? '' : ' disabled'} style="--dot:${catColor(block.c)}">` +
+      `<span class="sr-d"><b>${DAY_NAMES[date.getDay()].slice(0, 3)}</b><small>${formatShortDate(date)}</small></span>` +
+      `<span class="sr-b"><span class="sr-t" translate="no">${highlightMarkup(block.t, terms)}</span>` +
+      `<span class="sr-m"><i></i>${toHHMM(block.s)}–${toHHMM(block.e)} · ${when} · <span translate="no">${escapeHtml(categoryName(block.c))}</span>${block.d ? ` · ${t('hecha')}` : ''}</span>${extra}</span></button></li>`;
+  };
+  const upcoming = results.slice(0, upcomingCount);
+  const past = results.slice(upcomingCount);
+  const section = (title, list) => (list.length ? `<h3 class="sr-h">${title}</h3><ul class="sr-list">${list.map(item).join('')}</ul>` : '');
+  const repeats = rules.length
+    ? `<h3 class="sr-h">${t('Se repiten cada semana')}</h3><ul class="sr-list">${rules.map(r => (
+      `<li><div class="sr-item static" style="--dot:${catColor(r.c)}"><span class="sr-d"><b>${weekdaysLabel(r.dows)}</b></span>` +
+      `<span class="sr-b"><span class="sr-t" translate="no">${highlightMarkup(r.t, terms)}</span><span class="sr-m"><i></i>${toHHMM(r.s)}–${toHHMM(r.e)}</span></span></div></li>`)).join('')}</ul>`
+    : '';
+  return section(t('Próximas'), upcoming) + section(t('Anteriores'), past) + repeats;
 }
 
 /** Navegación entre meses de las estadísticas (mismo aspecto que la de semanas). */

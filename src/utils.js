@@ -74,6 +74,9 @@ export const weekDates = date => {
   return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 };
 
+/** Semanas de distancia entre la semana de `today` y la de `date` (0 = la misma, negativo = antes). */
+export const weekOffsetOf = (date, today) => Math.round(diffDays(mondayOf(today), mondayOf(date)) / 7);
+
 /** Fecha, dentro de la semana de `today`, que cae en el día de la semana `dow` (0 = domingo). */
 export const dateForDow = (dow, today) => addDays(mondayOf(today), (dow + 6) % 7);
 

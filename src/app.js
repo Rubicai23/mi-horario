@@ -23,9 +23,16 @@ import { setupTour } from './tour.js';
 import { setupWeekly } from './weekly-ui.js';
 import { setupPush } from './push-ui.js';
 import { setupCalendar } from './calendar-ui.js';
+import { setupSearch } from './search-ui.js';
+import { setupMove } from './move-ui.js';
+import { setupCarry } from './carry-ui.js';
+import { setupTracker } from './tracker-ui.js';
+import { createTracker } from './tracker.js';
+import { weekRange } from './weekview.js';
 import { buildShareText } from './summary.js';
 import {
-  addDays, dateForDow, formatLongDate, fromHHMM, minutesOfDay, plural, shortTitle, toDateKey, toHHMM, weekDates
+  addDays, dateForDow, formatLongDate, fromHHMM, minutesOfDay, parseDateKey, plural, shortTitle, startOfDay, toDateKey, toHHMM,
+  weekDates, weekOffsetOf
 } from './utils.js';
 
 const { $ } = ui;
@@ -51,11 +58,17 @@ function createContext() {
       pushProfile: profile => cloud.pushProfile(profile)
     }
   });
+  const tracker = createTracker({
+    load: () => state.settings.get('track'),
+    save: text => state.settings.set('track', text || ''),
+    getDay: key => state.getDay(key),
+    addTracked: (key, id, seconds) => state.addTracked(key, id, seconds)
+  });
   const serviceWorker = registerServiceWorker();
   const sheets = ui.createSheetManager({ overlay: $('ov'), inert: [$('app')] });
 
   return {
-    clock, native, cloud, state, sheets,
+    clock, native, cloud, state, sheets, tracker,
     notifier: createNotifier({ settings: state.settings, getRegistration: () => serviceWorker }),
     toast: ui.createToast($('toast')),
     editSheet: sheets.register($('sheetEdit')),
@@ -71,8 +84,15 @@ function createContext() {
     weeklySheet: sheets.register($('sheetWeekly')),
     calendarSheet: sheets.register($('sheetCalendar')),
     catsSheet: sheets.register($('sheetCats')),
+    moveSheet: sheets.register($('sheetMove')),
+    searchSheet: sheets.register($('sheetSearch')),
     deleteSheet: sheets.register($('sheetDelete')),
-    view: { selectedDow: clock().getDay(), weekOffset: 0, sorting: false, dateKey: toDateKey(clock()), minuteKey: '', stale: false },
+    view: {
+      selectedDow: clock().getDay(), weekOffset: 0, sorting: false, dateKey: toDateKey(clock()), minuteKey: '', stale: false,
+      mode: state.settings.get('mode') === 'week' ? 'week' : 'day',   // "Día" o "Semana"
+      carryHidden: new Set(),   // días cuyo aviso de pendientes se ocultó (hasta cerrar la app)
+      flashId: null             // actividad que se resalta al llegar desde el buscador
+    },
     account: { status: 'loading', email: '', uid: '' },
     analytics: 'off',       // off | on | unsupported
     migrated: false,        // ya se hizo la primera conciliación con la nube en esta sesión
@@ -88,12 +108,35 @@ function createContext() {
     syncPush: () => {},
     refreshPushSetting: () => {},
     render: () => {},       // lo sustituye createRenderer
-    requestRender: () => {}
+    requestRender: () => {},
+    trackerTick: () => {},  // lo sustituye setupTracker
+    paintCarry: () => {},   // lo sustituye setupCarry
+    refreshCarryButton: () => {},
+    openMove: () => {},     // lo sustituye setupMove
+    stopTrackerFor: () => null,
+    toggleTracker: () => {},
+    goToDay: () => false,   // lo define main()
+    selectedKey: () => '',
+    dateInRange: () => true
   };
 }
 
 /** Fecha de referencia de la semana que se está viendo (hoy ± semanas). */
 const anchorOf = (ctx, now) => addDays(now, ctx.view.weekOffset * 7);
+
+/** Va a un día (y resalta una actividad si se indica). false si la fecha queda fuera del calendario de la app. */
+function goToDay(ctx, key, flashId = null) {
+  const date = parseDateKey(key);
+  if (!date || !ctx.dateInRange(key)) return false;
+  Object.assign(ctx.view, {
+    mode: 'day', weekOffset: weekOffsetOf(date, startOfDay(ctx.clock())), selectedDow: date.getDay(), sorting: false, flashId
+  });
+  ctx.state.settings.set('mode', 'day');
+  ctx.swipeReset();
+  ctx.render();
+  if (!flashId) window.scrollTo({ top: 0 });
+  return true;
+}
 const selectedKey = (ctx, now = ctx.clock()) => toDateKey(dateForDow(ctx.view.selectedDow, anchorOf(ctx, now)));
 
 /** Máximo de plantillas propias que se muestran como atajos (el resto, en "Más → Plantillas"). */
@@ -170,18 +213,45 @@ function createRenderer(ctx) {
     $('weeknav').innerHTML = ui.weekNavMarkup({
       dates, offset: view.weekOffset, canPrev: view.weekOffset > -WEEK_RANGE.back, canNext: view.weekOffset < WEEK_RANGE.forward
     });
+    const weekMode = view.mode === 'week';
+    $('app').dataset.mode = weekMode ? 'week' : 'day';
+    $('viewDay').setAttribute('aria-selected', String(!weekMode));
+    $('viewWeek').setAttribute('aria-selected', String(weekMode));
+    $('weekview').hidden = !weekMode;
+    if (weekMode) {
+      const todayKey = toDateKey(now);
+      const days = dates.map(d => {
+        const dayKey = toDateKey(d);
+        return { date: d, key: dayKey, blocks: state.getDay(dayKey), isToday: dayKey === todayKey, isRest: state.isRestDay(dayKey) };
+      });
+      $('weekview').innerHTML = ui.weekViewMarkup({ days, range: weekRange(days.map(d => d.blocks)), nowMin });
+      return;
+    }
     $('days').innerHTML = ui.dayStripMarkup({ dates, today: now, selectedDow: view.selectedDow });
     $('hero').innerHTML = isToday
       ? ui.todayHeroMarkup({ now, status, nowMin, nextDay: state.nextPlannedDay(now), welcome })
       : ui.otherDayHeroMarkup({ date, blocks });
     $('streak').innerHTML = ui.streakMarkup(state.streakView(now));
 
+    const running = ctx.tracker.current();
+    const track = { id: running && running.key === key ? running.id : '', seconds: ctx.tracker.elapsed(now.getTime()), can: isToday };
+    ctx.paintCarry({ key, blocks, nowMin });
     keepFocus(() => {
       $('tl').className = `tl${view.sorting ? ' sorting' : ''}`;
       $('tl').innerHTML = ui.listMarkup({
-        blocks, isToday, nowMin, currentIndex: status.index, sorting: view.sorting, presets: limitCustom(presets, 4), welcome
+        blocks, isToday, nowMin, currentIndex: status.index, sorting: view.sorting, presets: limitCustom(presets, 4), welcome, track
       });
     });
+    if (view.flashId) {
+      const target = Array.from($('tl').querySelectorAll('.item')).find(el => el.dataset.id === view.flashId);
+      view.flashId = null;
+      if (target) {
+        target.classList.add('flash');
+        const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        target.scrollIntoView({ block: 'center', behavior: calm ? 'auto' : 'smooth' });
+        setTimeout(() => target.classList.remove('flash'), 2400);
+      }
+    }
     $('quick').innerHTML = view.sorting || !blocks.length
       ? ''
       : ui.quickAddMarkup(limitCustom(presets.filter(p => p.quick && !p.used), 4));
@@ -240,6 +310,7 @@ function openBadges(ctx) {
 }
 
 function toggleDone(ctx, key, id) {
+  ctx.stopTrackerFor(key, id);   // al marcar como hecha una actividad que se estaba midiendo, se guarda su tiempo
   const result = ctx.state.toggleDone(key, id);
   if (!result.ok) return;
   const fresh = result.done ? ctx.state.checkBadges(ctx.clock()) : [];
@@ -286,6 +357,24 @@ function setupNavigation(ctx) {
     const again = $(button.id);
     if (again && !again.disabled) again.focus({ preventScroll: true }); // el teclado no pierde el foco al repintar
   });
+  const setMode = mode => {
+    if (view.mode === mode) return;
+    view.mode = mode;
+    view.sorting = false;
+    state.settings.set('mode', mode);
+    ctx.swipeReset();
+    ctx.cloud.track('view_mode', { mode });
+    ctx.render();
+  };
+  $('viewDay').addEventListener('click', () => setMode('day'));
+  $('viewWeek').addEventListener('click', () => setMode('week'));
+  $('weekview').addEventListener('click', e => {
+    const card = e.target.closest('.wv-day');
+    if (!card) return;
+    view.selectedDow = Number(card.dataset.dow);
+    setMode('day');
+    window.scrollTo({ top: 0 });
+  });
   $('addBtn').addEventListener('click', () => openEditor(ctx, null));
   $('quick').addEventListener('click', e => {
     const chip = e.target.closest('[data-preset]');
@@ -323,6 +412,7 @@ function setupList(ctx) {
     const row = e.target.closest('.row');
     if (!row) return;
     const id = row.closest('.item').dataset.id;
+    if (e.target.closest('.trk-btn')) { ctx.toggleTracker(selectedKey(ctx), id); return; }
     const subtask = e.target.closest('.sk');
     if (subtask) {
       if (e.target.closest('.sk-ck')) state.toggleSubtask(selectedKey(ctx), id, Number(subtask.dataset.i));
@@ -343,6 +433,7 @@ function setupList(ctx) {
 
 const editor = {
   key: null, id: null, category: 'libre',
+  wInitial: '',            // tiempo real (min) que se mostró al abrir: si no cambia, no se toca
   subtasks: [],            // copia de trabajo de las subtareas de la actividad
   rule: null,              // serie semanal a la que pertenece la actividad editada (si sigue vigente)
   repeat: false,           // interruptor "repetir" / "aplicar a las próximas semanas"
@@ -389,7 +480,9 @@ function openEditor(ctx, id) {
     $('fE').value = toHHMM(block.e);
     $('fN').value = block.n;
     selectCategory(block.c);
+    editor.wInitial = block.w ? String(Math.max(1, Math.round(block.w / 60))) : '';
   } else {
+    editor.wInitial = '';
     const lastEnd = blocks.length ? Math.max(...blocks.map(b => b.e)) : 9 * 60;
     const start = Math.min(lastEnd, 22 * 60 + 30);
     $('fT').value = '';
@@ -398,6 +491,15 @@ function openEditor(ctx, id) {
     $('fN').value = '';
     selectCategory(ctx.state.listCategories().some(c => c.key === 'libre') ? 'libre' : (ctx.state.listCategories()[0] || {}).key);
   }
+
+  const measuring = Boolean(block && ctx.tracker.isRunning(key, block.id));
+  $('fWrap').hidden = !block;
+  $('moveBtn').hidden = !block;
+  $('fW').value = editor.wInitial;
+  $('fW').disabled = measuring;
+  $('fWhint').textContent = measuring
+    ? 'El cronómetro está en marcha: páralo para poder corregir el tiempo.'
+    : 'Se rellena solo con el cronómetro de la actividad. Aquí lo puedes corregir.';
 
   editor.subtasks = block && block.k ? block.k.map(item => ({ ...item })) : [];
   $('fKnew').value = '';
@@ -506,7 +608,8 @@ function setupEditor(ctx) {
     });
   });
 
-  $('saveBtn').addEventListener('click', () => {
+  /** Lo escrito en el editor; null (y un aviso) si el tiempo real no es un número válido. */
+  const readDraft = () => {
     const draft = {
       t: $('fT').value.trim(),
       s: fromHHMM($('fS').value),
@@ -515,6 +618,29 @@ function setupEditor(ctx) {
       n: $('fN').value.trim(),
       k: editor.subtasks
     };
+    const raw = $('fW').value.trim();
+    if (editor.id && !$('fW').disabled && raw !== editor.wInitial) {
+      const minutes = Math.round(Number(raw));
+      if (raw !== '' && !(minutes >= 0)) { showEditorError('Escribe el tiempo real en minutos (0 o más).'); return null; }
+      draft.w = raw === '' || minutes <= 0 ? 0 : Math.min(minutes, 1440) * 60;
+    }
+    return draft;
+  };
+
+  $('moveBtn').addEventListener('click', () => {
+    if (!editor.id) return;
+    const draft = readDraft();
+    if (!draft) return;
+    const saved = state.updateBlock(editor.key, editor.id, draft);   // lo escrito se guarda antes de mover
+    if (!saved.ok) { showEditorError(saved.error); return; }
+    const { key, id } = editor;
+    ctx.editSheet.close();
+    ctx.openMove(key, id);
+  });
+
+  $('saveBtn').addEventListener('click', () => {
+    const draft = readDraft();
+    if (!draft) return;
     const dows = Array.from(editor.dows);
     let result;
     let series = null;
@@ -591,6 +717,7 @@ function setupDayMenu(ctx) {
     const date = dateForDow(ctx.view.selectedDow, anchorOf(ctx, ctx.clock()));
     $('dayLabel').textContent = formatLongDate(date);
     refreshRestButton(ctx);
+    ctx.refreshCarryButton();
     ctx.daySheet.open();
   });
   $('closeDay').addEventListener('click', ctx.daySheet.close);
@@ -1260,6 +1387,7 @@ function setupClock(ctx) {
     if (dateKey !== view.dateKey) { view.dateKey = dateKey; view.selectedDow = now.getDay(); view.weekOffset = 0; force = true; }
     checkStarts(now, false);
     ctx.pomodoroTick();
+    ctx.trackerTick();
     if (ctx.busy()) return; // no repintar durante un gesto; se hará al terminar
     const minuteKey = `${dateKey}-${now.getHours()}:${now.getMinutes()}`;
     if (force || view.stale || minuteKey !== view.minuteKey) { view.minuteKey = minuteKey; ctx.render(now); }
@@ -1325,6 +1453,14 @@ function main() {
     startTranslator();
   }
   const ctx = createContext();
+  ctx.goToDay = (key, id) => goToDay(ctx, key, id);
+  ctx.selectedKey = () => selectedKey(ctx);
+  ctx.dateInRange = key => {
+    const date = parseDateKey(key);
+    if (!date) return false;
+    const offset = weekOffsetOf(date, startOfDay(ctx.clock()));
+    return offset >= -WEEK_RANGE.back && offset <= WEEK_RANGE.forward;
+  };
   applyAppearance(ctx);
   createRenderer(ctx);
   setupNavigation(ctx);
@@ -1336,6 +1472,10 @@ function main() {
   setupWeekly(ctx);
   setupPush(ctx);
   setupCalendar(ctx);
+  setupSearch(ctx);
+  setupMove(ctx);
+  setupCarry(ctx);
+  setupTracker(ctx);
   setupNative(ctx);
   setupMenuAndPomodoro(ctx, { openBadges: () => openBadges(ctx), openTour: () => ctx.openTour() });
   setupCategories(ctx);

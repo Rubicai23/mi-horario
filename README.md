@@ -118,3 +118,13 @@ npm run cap:android      # build + sync + abrir Android Studio
 - **Resumen semanal automático** (Ajustes → Resumen cada semana): opcional, apagado por defecto.
 - **Avisos con la app cerrada**: ver `AVISOS-PUSH.md` (necesita plan Blaze y desplegar `functions/`).
 - Se eliminaron las etiquetas y la exportación a `.ics`.
+
+## Tanda 8
+
+- **Vista de semana** (interruptor *Día | Semana* bajo la cabecera): las 7 jornadas en tarjetas, con una barra de colores por categoría (más clara si está pendiente), la línea de "ahora", los primeros apuntes del día y el mayor hueco libre. Tocar un día lo abre. La app recuerda la vista elegida (`cfg:mode`). Cálculos puros en `src/weekview.js`.
+- **Pasar pendientes**: aviso sobre la lista cuando hay actividades sin hacer (hoy: las que ya terminaron; días pasados: todas) y opción en *Más → Pasar pendientes a mañana*. Desde hoy o un día futuro se **mueven**; desde un día pasado se **copian**, para no cambiar la racha de ese día. Si la hora está ocupada, la actividad va al primer hueco libre. Todo con *Deshacer*. Lógica en `state.carryOver` y `findFreeSlot`.
+- **Buscador** (lupa de la cabecera): ignora mayúsculas y acentos, acepta varias palabras (todas deben aparecer) y mira en título, nota, subtareas y categoría. Filtros por categoría y estado, resultados separados en *Próximas* y *Anteriores* con las coincidencias resaltadas, repeticiones semanales aparte, búsquedas recientes y salto al día con la actividad resaltada. Motor puro en `src/search.js`; `state.search`.
+- **Mover o copiar una actividad** (editor → *Mover o copiar a otro día…*): mover a una fecha (atajos o selector) o copiar a varios días; avisa si choca con otra actividad. La copia nace sin marcar, sin nota y sin tiempo medido. `state.moveBlock`.
+- **Tiempo real**: botón *Medir tiempo* en las actividades de hoy. Un solo cronómetro a la vez (`src/tracker.js`, se guarda en el dispositivo y sobrevive a cerrar la app), chip en la cabecera, se para al marcar la actividad como hecha, no cuenta más allá de la medianoche del día en que empezó y se puede corregir a mano en el editor. Se guarda en el campo `w` (segundos) de la actividad, que viaja con el día a Firestore (las reglas no cambian). Las estadísticas muestran el tiempo real frente al planificado de las actividades medidas.
+- **Reglas de Firestore y funciones**: sin cambios en esta tanda.
+- Pruebas: `tests/planner.test.js` (lógica) y `e2e/t11.mjs` (navegador).

@@ -25,7 +25,11 @@
   <header class="top">
     <span class="brand">Mi horario</span>
     <div class="tools">
+      <button class="pomo-pill trk-pill" id="trackPill" type="button" hidden aria-label="Cronómetro de actividad en marcha"></button>
       <button class="pomo-pill" id="pomoPill" type="button" hidden aria-label="Abrir el Pomodoro"></button>
+      <button class="icon-btn" id="openSearch" aria-label="Buscar actividades">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      </button>
       <button class="icon-btn" id="openMenu" aria-label="Menú">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
@@ -38,10 +42,16 @@
     </div>
   </header>
 
+  <div class="seg view-seg" id="viewSeg" role="tablist" aria-label="Vista">
+    <button type="button" role="tab" id="viewDay" aria-selected="true">Día</button>
+    <button type="button" role="tab" id="viewWeek" aria-selected="false">Semana</button>
+  </div>
   <div class="weeknav" id="weeknav"></div>
+  <section class="weekview" id="weekview" aria-label="Vista de la semana" hidden></section>
   <nav class="days" id="days" aria-label="Días de la semana"></nav>
   <section class="hero" id="hero"></section>
   <section class="streak" id="streak" aria-label="Racha"></section>
+  <div class="carry" id="carry" hidden></div>
 
   <div class="actions">
     <button class="pill" id="sortBtn">Ordenar</button>
@@ -121,6 +131,12 @@
     </div>
   </div>
   <label class="f"><span>Lo que hice</span><textarea id="fN" rows="3" maxlength="300" placeholder="Anota aquí lo que hiciste"></textarea></label>
+  <label class="f" id="fWrap">
+    <span>Tiempo real (minutos)</span>
+    <input id="fW" type="number" min="0" max="1440" step="1" inputmode="numeric" placeholder="Sin medir">
+    <small class="set-s" id="fWhint">Se rellena solo con el cronómetro de la actividad. Aquí lo puedes corregir.</small>
+  </label>
+  <button type="button" class="btn2 block move-open" id="moveBtn" hidden>Mover o copiar a otro día…</button>
   <div class="rep" id="fRep" hidden>
     <div class="set-row slim rep-row">
       <div>
@@ -147,6 +163,7 @@
   <p class="set-s menu-sub" id="dayLabel"></p>
   <div class="menu">
     <button class="menu-item" id="menuCopy"><b>Copiar a otros días</b><small>Repite este día en otros de esta semana o de la siguiente.</small></button>
+    <button class="menu-item" id="menuCarry"><b id="menuCarryT">Pasar pendientes a mañana</b><small id="menuCarryS">Lo que no has hecho se reprograma al día siguiente.</small></button>
     <button class="menu-item" id="menuTemplates"><b>Plantillas</b><small>Guarda este día como plantilla o añade una de las tuyas.</small></button>
     <button class="menu-item" id="menuRepeats"><b>Repeticiones</b><small>Actividades que se crean solas cada semana.</small></button>
     <button class="menu-item" id="menuRest"><b id="menuRestT">Marcar como día de descanso</b><small id="menuRestS">No suma ni rompe tu racha.</small></button>
@@ -194,6 +211,47 @@
   <p class="set-s menu-sub">Actividades que se crean solas cada semana. Para crear una, activa «Repetir cada semana» al añadir una actividad.</p>
   <div id="repList"></div>
   <button class="btn" id="closeRepeats">Hecho</button>
+</section>
+
+<!-- Mover o copiar una actividad -->
+<section class="sheet" id="sheetMove" role="dialog" aria-modal="true" aria-labelledby="smvTitle">
+  <h2 id="smvTitle">Mover o copiar</h2>
+  <p class="set-s menu-sub" id="moveWhat"></p>
+  <div class="seg" role="tablist" aria-label="Acción">
+    <button type="button" role="tab" id="moveTabMove" aria-selected="true">Mover</button>
+    <button type="button" role="tab" id="moveTabCopy" aria-selected="false">Copiar</button>
+  </div>
+  <div id="movePanelMove">
+    <div class="chips" id="moveQuick" role="group" aria-label="Atajos de fecha"></div>
+    <label class="f"><span>O elige una fecha</span><input id="moveDate" type="date"></label>
+  </div>
+  <div id="movePanelCopy" hidden>
+    <p class="set-s menu-sub">Elige uno o varios días. La copia sale sin marcar, sin anotaciones y sin tiempo medido.</p>
+    <div id="moveTargets"></div>
+  </div>
+  <p class="warn" id="moveWarn" role="status" hidden></p>
+  <p class="err" id="moveErr" role="alert" hidden></p>
+  <button class="btn" id="moveGo">Mover</button>
+  <div class="sub"><button id="moveCancel">Cancelar</button></div>
+</section>
+
+<!-- Buscar -->
+<section class="sheet sheet-tall" id="sheetSearch" role="dialog" aria-modal="true" aria-labelledby="ssTitle">
+  <h2 id="ssTitle">Buscar</h2>
+  <div class="search-box">
+    <input id="searchInput" type="search" placeholder="Título, nota, subtarea o categoría" autocomplete="off" autocapitalize="none" enterkeyhint="search" aria-label="Buscar actividades">
+    <button type="button" class="search-x" id="searchClear" aria-label="Borrar búsqueda" hidden>×</button>
+  </div>
+  <div class="chips search-chips" id="searchCats" role="group" aria-label="Filtrar por categoría"></div>
+  <div class="seg" role="tablist" aria-label="Estado">
+    <button type="button" role="tab" id="searchAll" aria-selected="true">Todas</button>
+    <button type="button" role="tab" id="searchPending" aria-selected="false">Pendientes</button>
+    <button type="button" role="tab" id="searchDone" aria-selected="false">Hechas</button>
+  </div>
+  <div id="searchRecent"></div>
+  <p class="set-s search-count" id="searchCount" role="status" aria-live="polite"></p>
+  <div id="searchResults"></div>
+  <button class="btn2 block" id="closeSearch">Cerrar</button>
 </section>
 
 <!-- Categorías -->
