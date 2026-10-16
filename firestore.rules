@@ -53,7 +53,7 @@ service cloud.firestore {
         && (!('rest' in data) || (data.rest is list && data.rest.size() <= 400))                // LIMITS.restDays
         && (!('streak' in data) || (data.streak is map && data.streak.size() <= 2))             // { goal, days }
         && (!('badges' in data) || (data.badges is map && data.badges.size() <= 40))            // LIMITS.badges
-        && (!('cats' in data) || (data.cats is map && data.cats.size() <= 6))                   // una por categoría
+        && (!('cats' in data) || (data.cats is map && data.cats.size() <= 26))                  // LIMITS.categories (20) + las 6 iniciales
         && (!('tags' in data) || (data.tags is list && data.tags.size() <= 12))                 // LIMITS.tags
         && data.updatedAt is timestamp
         && data.updatedAt == request.time;
@@ -67,6 +67,30 @@ service cloud.firestore {
         && isValidProfile(request.resource.data);
 
       allow delete: if isOwner(uid);
+    }
+
+    // ───────────── calendarFeeds/{token} ─────────────
+    // Enlace de calendario suscrito. El token (32 caracteres al azar) es el permiso de lectura que usa la función
+    // de la nube; el usuario solo puede crear, ver, cambiar el aviso y borrar los suyos (no se pueden listar los de otros).
+    function isValidFeed(data) {
+      return data.keys().hasOnly(['uid', 'alarm', 'createdAt'])
+        && data.keys().hasAll(['uid', 'alarm', 'createdAt'])
+        && data.uid == request.auth.uid
+        && data.alarm is int && data.alarm >= -1 && data.alarm <= 120   // -1 = sin aviso
+        && data.createdAt is timestamp;
+    }
+
+    match /calendarFeeds/{token} {
+      allow get, list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn()
+        && token.matches('^[A-Za-z0-9_-]{32}$')
+        && isValidFeed(request.resource.data)
+        && request.resource.data.createdAt == request.time;
+      allow update: if isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && isValidFeed(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
     // ───────────── pushQueue/{uid} ─────────────

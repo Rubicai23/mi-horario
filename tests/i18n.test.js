@@ -67,8 +67,14 @@ test('todo texto fijo de index.html tiene traducción', () => {
 
 test('todo t(\'…\') del código tiene traducción', () => {
   const missing = new Set();
-  for (const file of fs.readdirSync(new URL('../src/', import.meta.url))) {
-    if (!file.endsWith('.js') || file === 'lang-en.js' || file === 'i18n.js') continue;
+  // Solo los archivos que la app realmente usa (los que cuelgan de app.js): un archivo viejo olvidado no debe romper el despliegue.
+  const used = new Set(['app.js']);
+  for (const file of used) {
+    const text = fs.readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+    for (const m of text.matchAll(/from '\.\/([\w-]+\.js)'/g)) used.add(m[1]);
+  }
+  for (const file of used) {
+    if (file === 'lang-en.js' || file === 'i18n.js') continue;
     const code = fs.readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
     for (const m of code.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) {
       const key = m[1].replace(/\\'/g, "'");
