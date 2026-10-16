@@ -6,8 +6,8 @@ import * as ui from './ui-components.js';
 const { $ } = ui;
 const STEPS = Object.freeze([
   { art: '📅', title: 'Tu día, a tu manera', text: 'Toca «Añadir» para crear actividades con su hora. Marca el círculo cuando las hagas y desliza una fila para editarla o borrarla.' },
-  { art: '🔥', title: 'Constancia sin agobios', text: 'Cumple tu meta del día para mantener la racha. Puedes marcar días de descanso, ajustar la meta en Ajustes y ganar insignias por el camino.' },
-  { art: '⏱️', title: 'Más herramientas', text: 'En el menú ☰ tienes el Pomodoro para concentrarte por tramos. Con «Más» copias días, guardas plantillas y creas repeticiones semanales.' }
+  { art: '🔥', title: 'Constancia sin agobios', text: 'Cumple tu meta del día para mantener la racha. Puedes marcar días de descanso y ajustar la meta en Ajustes.' },
+  { art: '🔎', title: 'Más herramientas', text: 'Con la lupa buscas cualquier actividad. En «Más» copias días, pasas pendientes a mañana, guardas plantillas y creas repeticiones. Con «Sin hora» apuntas tareas sin decidir cuándo y luego les pones día y hora. Con «Medir tiempo» ves cuánto tardas de verdad.' }
 ]);
 
 export function setupTour(ctx) {

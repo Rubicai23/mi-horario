@@ -16,6 +16,10 @@ import { isEnglish, t } from './i18n.js';
 
 /* ───────── Límites y reglas de negocio ───────── */
 export const MAX_MIN = 1439;            // 23:59
+/** Duraciones que se pueden estimar para una tarea sin hora (minutos). */
+export const INBOX_MINUTES = Object.freeze([15, 30, 45, 60, 90, 120, 180]);
+export const INBOX_DEFAULT_MINUTES = 30;
+
 export const LIMITS = Object.freeze({
   blocksPerDay: 60,                     // debe coincidir con firestore.rules
   titleLength: 80,
@@ -29,6 +33,7 @@ export const LIMITS = Object.freeze({
   badges: 40,                           // debe coincidir con firestore.rules
   categories: 20,                       // categorías activas como máximo; firestore.rules admite 20 + las 6 iniciales (26)
   categoryLabel: 20,
+  inbox: 50,                            // tareas sin hora; debe coincidir con firestore.rules
 
 });
 
@@ -95,17 +100,6 @@ export const THEMES = Object.freeze([
   { key: 'light', label: t('Claro') },
   { key: 'dark', label: t('Oscuro') }
 ]);
-/** Colores de acento. El color de cada uno está definido en style.css (data-accent). */
-export const ACCENTS = Object.freeze([
-  { key: 'verde', label: t('Verde'), swatch: '#3F6B5A' },
-  { key: 'azul', label: t('Azul'), swatch: '#3F6A9B' },
-  { key: 'violeta', label: t('Violeta'), swatch: '#6D5A9E' },
-  { key: 'ambar', label: t('Ámbar'), swatch: '#A9742A' },
-  { key: 'rosa', label: t('Rosa'), swatch: '#A9577A' },
-  { key: 'grafito', label: t('Grafito'), swatch: '#4B5350' }
-]);
-export const DEFAULT_ACCENT = 'verde';
-
 /* ───────── Categorías ───────── */
 export const CATEGORIES = Object.freeze([
   { key: 'clase',   label: t('Clase'),    color: 'var(--c-clase)' },

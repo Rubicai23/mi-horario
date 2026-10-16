@@ -78,7 +78,7 @@ test('categorías: perfil con datos, copia de seguridad y ajustes de aspecto', (
   const a = setup();
   a.state.setCategory('gym', { label: 'Deporte', color: 'verde' });
   a.state.settings.set('theme', 'dark');
-  a.state.settings.set('accent', 'azul');
+  a.state.settings.set('lang', 'en');
   const text = JSON.stringify(a.state.exportBackup());
   assert.deepEqual(parseBackup(text).profile.cats, { gym: { l: 'Deporte', c: 'verde' } });
   assert.equal(parseBackup(text).settings.length, 2);

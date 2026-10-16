@@ -1,7 +1,7 @@
 /**
- * push-ui.js — Avisos con la app cerrada (Web Push). Opcional y solo con sesión iniciada.
- * La app guarda en la nube los próximos avisos (título y hora de cada actividad) y una función programada
- * los envía a su hora. Si PUSH.vapidKey está vacío, el ajuste no se muestra.
+ * push-ui.js — Avisos con la app cerrada (Web Push). Se activan junto al interruptor "Avisos de actividad"
+ * cuando hay sesión iniciada y la clave VAPID está configurada. La app guarda en la nube los próximos avisos
+ * (título y hora de cada actividad) y una función programada los envía a su hora.
  */
 import { PUSH } from './config.js';
 import { reminderTitle } from './platform.js';
@@ -12,17 +12,16 @@ const debounce = (fn, ms) => {
   return () => { clearTimeout(timer); timer = setTimeout(fn, ms); };
 };
 
-const $ = id => document.getElementById(id);
-
 export const pushAvailable = ctx => Boolean(
   PUSH.vapidKey && !ctx.native && typeof Notification !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window
 );
 
 export function setupPush(ctx) {
   const { state, cloud, toast } = ctx;
-  const active = () => pushAvailable(ctx) && state.settings.getFlag('push') && Notification.permission === 'granted'
-    && ctx.account.status === 'signedIn';
+  const signedIn = () => ctx.account.status === 'signedIn';
+  const active = () => pushAvailable(ctx) && state.settings.getFlag('push') && Notification.permission === 'granted' && signedIn();
   ctx.pushActive = active;
+  ctx.pushPossible = () => pushAvailable(ctx);
 
   ctx.syncPush = debounce(() => {
     if (!active()) return;
@@ -33,45 +32,36 @@ export function setupPush(ctx) {
     cloud.pushSchedule(items);
   }, 1500);
 
-  const describe = () => {
-    if (!pushAvailable(ctx)) return null;
-    if (ctx.account.status !== 'signedIn') return { on: false, disabled: true, text: 'Inicia sesión para usar los avisos con la app cerrada.' };
-    const on = active();
-    return {
-      on, disabled: false,
-      text: on
-        ? 'Activado. Te llegan los avisos aunque la app esté cerrada. Se guarda en la nube la hora y el título de tus próximas actividades.'
-        : 'Desactivado. Si lo activas, los avisos llegan aunque la app esté cerrada (en iPhone, con la app añadida a la pantalla de inicio).'
-    };
-  };
-
-  ctx.refreshPushSetting = () => {
-    const d = describe();
-    $('pushRow').hidden = !d;
-    if (!d) return;
-    $('pushSwitch').setAttribute('aria-checked', d.on);
-    $('pushSwitch').disabled = d.disabled;
-    $('pushStatus').textContent = d.text;
-  };
-
-  $('pushSwitch').addEventListener('click', async () => {
-    if (active()) {
-      state.settings.setFlag('push', false);
-      await cloud.disablePush();
-      ctx.refreshPushSetting();
-      return;
-    }
+  /** Activa los avisos con la app cerrada. Con `quiet` no muestra avisos si falla (se prueba sola al iniciar sesión). */
+  ctx.enablePush = async ({ quiet = false } = {}) => {
+    if (!pushAvailable(ctx) || !signedIn()) return false;
     try {
       const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
-      if (permission !== 'granted') { toast.show('Permiso de notificaciones denegado.', { duration: 5000 }); return; }
+      if (permission !== 'granted') {
+        if (!quiet) toast.show('Permiso de notificaciones denegado.', { duration: 5000 });
+        return false;
+      }
       const registration = await navigator.serviceWorker.ready;
       await cloud.enablePush(PUSH.vapidKey, registration);
       state.settings.setFlag('push', true);
       ctx.syncPush();
-      toast.show('Avisos con la app cerrada activados.');
+      return true;
     } catch (_) {
-      toast.show('No se pudo activar. Comprueba la conexión e inténtalo de nuevo.', { duration: 6000 });
+      if (!quiet) toast.show('No se pudo activar. Comprueba la conexión e inténtalo de nuevo.', { duration: 6000 });
+      return false;
     }
-    ctx.refreshPushSetting();
-  });
+  };
+
+  ctx.disablePush = async () => {
+    if (!state.settings.getFlag('push')) return;
+    state.settings.setFlag('push', false);
+    try { await cloud.disablePush(); } catch (_) { /* sin conexión: ya no se programarán más */ }
+  };
+
+  /** Al iniciar sesión con los avisos ya activados en este dispositivo, se completan con los de la app cerrada. */
+  ctx.autoEnablePush = () => {
+    if (!pushAvailable(ctx) || !signedIn() || state.settings.getFlag('push')) return;
+    if (!ctx.notifier.status().enabled) return;
+    ctx.enablePush({ quiet: true }).then(ok => { if (ok) ctx.refreshSettings(); });
+  };
 }

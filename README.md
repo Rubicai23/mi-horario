@@ -128,3 +128,17 @@ npm run cap:android      # build + sync + abrir Android Studio
 - **Tiempo real**: botón *Medir tiempo* en las actividades de hoy. Un solo cronómetro a la vez (`src/tracker.js`, se guarda en el dispositivo y sobrevive a cerrar la app), chip en la cabecera, se para al marcar la actividad como hecha, no cuenta más allá de la medianoche del día en que empezó y se puede corregir a mano en el editor. Se guarda en el campo `w` (segundos) de la actividad, que viaja con el día a Firestore (las reglas no cambian). Las estadísticas muestran el tiempo real frente al planificado de las actividades medidas.
 - **Reglas de Firestore y funciones**: sin cambios en esta tanda.
 - Pruebas: `tests/planner.test.js` (lógica) y `e2e/t11.mjs` (navegador).
+
+
+## Tanda 9 — limpieza y «Sin hora»
+
+**Quitado:** Compartir resumen semanal, colores de acento, Insignias y Pomodoro.
+**Juntado:** los 3 avisos en un solo interruptor «Avisos» (más cuánto antes); meta y días de racha en «Racha».
+**Movido:** Categorías al menú ☰; «Estadísticas de uso» a «Cuenta y datos»; «Ver tutorial» al final de Ajustes.
+Ajustes tiene ahora 4 bloques plegables: Avisos, Aspecto e idioma, Racha, Cuenta y datos.
+
+**Nuevo — Actividades sin hora** (botón «Sin hora» junto a Añadir): lista de tareas sin día ni hora (máx. 50).
+Tocar el cuadro la completa (con Deshacer); tocar el texto la edita; «Poner hora…» elige día, propone el primer hueco
+libre y abre el editor ya rellenado. Se sincroniza en el perfil (`inbox`).
+**Hay que republicar las reglas:** `firebase deploy --only firestore:rules`.
+**Borra en GitHub** los archivos viejos: `tests/pomodoro.test.js`, `src/pomodoro.js`, `src/pomodoro-ui.js`, `tests/tags.test.js`, `tests/ics.test.js`, `src/export-ui.js`, `src/ics.js`.

@@ -6,7 +6,7 @@
  * ni HTML (ui-components.js), ni detalles web/nativos (platform.js).
  */
 import {
-  ACCENTS, CATEGORY_COLORS, DEFAULT_ACCENT, FIREBASE_CONFIG, LEAD_OPTIONS, LIMITS, MONTH_RANGE, NOTIFICATIONS,
+  CATEGORY_COLORS, FIREBASE_CONFIG, LEAD_OPTIONS, LIMITS, MONTH_RANGE, NOTIFICATIONS,
   STREAK_RULES, THEMES, WEEK_RANGE
 } from './config.js';
 import {
@@ -14,22 +14,21 @@ import {
 } from './state-manager.js';
 import { createCloudService } from './firebase-service.js';
 import {
-  createInstallPrompt, createNotifier, deliverFile, isNative, platformInfo, readFileAsText, registerServiceWorker, shareText
+  createInstallPrompt, createNotifier, deliverFile, isNative, platformInfo, readFileAsText, registerServiceWorker
 } from './platform.js';
 import * as ui from './ui-components.js';
 import { LANG, LOCALE, isEnglish, startTranslator, t } from './i18n.js';
-import { setupMenuAndPomodoro } from './pomodoro-ui.js';
 import { setupTour } from './tour.js';
 import { setupWeekly } from './weekly-ui.js';
 import { setupPush } from './push-ui.js';
 import { setupCalendar } from './calendar-ui.js';
 import { setupSearch } from './search-ui.js';
 import { setupMove } from './move-ui.js';
+import { setupInbox } from './inbox-ui.js';
 import { setupCarry } from './carry-ui.js';
 import { setupTracker } from './tracker-ui.js';
 import { createTracker } from './tracker.js';
 import { weekRange } from './weekview.js';
-import { buildShareText } from './summary.js';
 import {
   addDays, dateForDow, formatLongDate, fromHHMM, minutesOfDay, parseDateKey, plural, shortTitle, startOfDay, toDateKey, toHHMM,
   weekDates, weekOffsetOf
@@ -78,14 +77,13 @@ function createContext() {
     copySheet: sheets.register($('sheetCopy')),
     templatesSheet: sheets.register($('sheetTemplates')),
     repeatsSheet: sheets.register($('sheetRepeats')),
-    badgesSheet: sheets.register($('sheetBadges')),
     menuSheet: sheets.register($('sheetMenu')),
-    pomodoroSheet: sheets.register($('sheetPomodoro')),
     weeklySheet: sheets.register($('sheetWeekly')),
     calendarSheet: sheets.register($('sheetCalendar')),
     catsSheet: sheets.register($('sheetCats')),
     moveSheet: sheets.register($('sheetMove')),
     searchSheet: sheets.register($('sheetSearch')),
+    inboxSheet: sheets.register($('sheetInbox')),
     deleteSheet: sheets.register($('sheetDelete')),
     view: {
       selectedDow: clock().getDay(), weekOffset: 0, sorting: false, dateKey: toDateKey(clock()), minuteKey: '', stale: false,
@@ -99,20 +97,25 @@ function createContext() {
     profileMigrated: false, // ídem para el perfil (plantillas propias)
     busy: () => false,      // lo sustituye setupList: true mientras hay un gesto en curso
     swipeReset: () => {},   // lo sustituye setupList: cierra la fila abierta
-    pomodoroTick: () => {}, // lo sustituye setupMenuAndPomodoro
     openTour: () => {},     // lo sustituye setupTour
     maybeShowTour: () => {},
     maybeShowWeekly: () => {},  // lo sustituye setupWeekly
     markWeeklySeen: () => {},
     pushActive: () => false,  // lo sustituye setupPush
     syncPush: () => {},
-    refreshPushSetting: () => {},
+    enablePush: async () => false,
+    disablePush: async () => {},
+    autoEnablePush: () => {},
+    pushPossible: () => false,
     render: () => {},       // lo sustituye createRenderer
     requestRender: () => {},
     trackerTick: () => {},  // lo sustituye setupTracker
     paintCarry: () => {},   // lo sustituye setupCarry
     refreshCarryButton: () => {},
+    openInbox: () => {},    // lo sustituye setupInbox
+    paintInbox: () => {},
     openMove: () => {},     // lo sustituye setupMove
+    openCategories: () => {},  // lo sustituye setupCategories
     stopTrackerFor: () => null,
     toggleTracker: () => {},
     goToDay: () => false,   // lo define main()
@@ -149,13 +152,11 @@ const limitCustom = (presets, max) => {
 
 /* ═════════════ Aspecto y categorías propias ═════════════ */
 
-/** Tema (automático/claro/oscuro) y color de acento de este dispositivo. */
+/** Tema (automático/claro/oscuro) de este dispositivo. */
 function applyAppearance(ctx) {
   const root = document.documentElement;
   const theme = ctx.state.settings.get('theme');
-  const accent = ctx.state.settings.get('accent');
   if (theme === 'light' || theme === 'dark') root.dataset.theme = theme; else delete root.dataset.theme;
-  if (ACCENTS.some(a => a.key === accent) && accent !== DEFAULT_ACCENT) root.dataset.accent = accent; else delete root.dataset.accent;
   // Barra de estado del móvil: si el tema está forzado, los dos avisos de color apuntan al mismo fondo.
   document.querySelectorAll('meta[name="theme-color"]').forEach(meta => {
     if (!meta.dataset.original) meta.dataset.original = meta.getAttribute('content');
@@ -261,6 +262,8 @@ function createRenderer(ctx) {
     $('sortBtn').hidden = blocks.length < 2 && !view.sorting;
     $('moreBtn').hidden = view.sorting;
     $('addBtn').hidden = view.sorting;
+    $('inboxBtn').hidden = view.sorting;
+    ctx.paintInbox();
     $('clearBtn').hidden = !blocks.length || view.sorting;
     $('hint').textContent = view.sorting
       ? 'Arrastra el icono de la derecha para mover una actividad. Las horas se recalculan manteniendo la duración de cada una.'
@@ -304,29 +307,16 @@ function applyPreset(ctx, presetId) {
   });
 }
 
-function openBadges(ctx) {
-  $('badgeList').innerHTML = ui.badgesMarkup(ctx.state.listBadges(ctx.clock()));
-  ctx.badgesSheet.open();
-}
-
 function toggleDone(ctx, key, id) {
   ctx.stopTrackerFor(key, id);   // al marcar como hecha una actividad que se estaba midiendo, se guarda su tiempo
   const result = ctx.state.toggleDone(key, id);
   if (!result.ok) return;
-  const fresh = result.done ? ctx.state.checkBadges(ctx.clock()) : [];
-  if (fresh.length) ctx.cloud.track('badge_earned', { count: fresh.length });
-  const badgeText = fresh.length === 1 ? t(' Insignia nueva: {0}.', fresh[0].title) : fresh.length ? t(' {0} insignias nuevas.', fresh.length) : '';
-  const badgeOnly = fresh.length === 1 ? ` ${fresh[0].title}.` : fresh.length ? ` ${fresh.length} ${t('insignias nuevas')}.` : '';
-  const seeBadges = fresh.length ? { label: 'Ver', onAction: () => openBadges(ctx) } : {};
   const reachedGoal = result.done && !result.before.met && result.after.met;
   if (reachedGoal && key === toDateKey(ctx.clock())) {
     const { current } = ctx.state.streakView();
     vibrate(30);
     ctx.cloud.track('daily_goal_met', { streak: current });
-    ctx.toast.show(t('¡Objetivo de hoy cumplido! Racha: {0}.{1}', plural(current, 'día', 'días'), badgeText), { duration: 6000, ...seeBadges });
-  } else if (fresh.length) {
-    vibrate(30);
-    ctx.toast.show(t('¡Insignia conseguida!{0}', badgeOnly), { duration: 6000, ...seeBadges });
+    ctx.toast.show(t('¡Objetivo de hoy cumplido! Racha: {0}.', plural(current, 'día', 'días')), { duration: 6000 });
   } else if (result.done) {
     ctx.cloud.track('activity_done');
   }
@@ -376,6 +366,7 @@ function setupNavigation(ctx) {
     window.scrollTo({ top: 0 });
   });
   $('addBtn').addEventListener('click', () => openEditor(ctx, null));
+  ctx.openEditor = (id, prefill) => openEditor(ctx, id, prefill);
   $('quick').addEventListener('click', e => {
     const chip = e.target.closest('[data-preset]');
     if (chip) applyPreset(ctx, chip.dataset.preset);
@@ -432,7 +423,7 @@ function setupList(ctx) {
 /* ═════════════ Editor de actividad ═════════════ */
 
 const editor = {
-  key: null, id: null, category: 'libre',
+  key: null, id: null, inboxId: null, category: 'libre',
   wInitial: '',            // tiempo real (min) que se mostró al abrir: si no cambia, no se toca
   subtasks: [],            // copia de trabajo de las subtareas de la actividad
   rule: null,              // serie semanal a la que pertenece la actividad editada (si sigue vigente)
@@ -466,11 +457,11 @@ function renderRepeat() {
   $('repDays').innerHTML = ui.weekdayChipsMarkup({ selected: editor.dows, locked });
 }
 
-function openEditor(ctx, id) {
+function openEditor(ctx, id, prefill = null) {
   const key = selectedKey(ctx);
   const blocks = ctx.state.getDay(key);
   const block = id ? blocks.find(b => b.id === id) : null;
-  Object.assign(editor, { key, id: block ? block.id : null });
+  Object.assign(editor, { key, id: block ? block.id : null, inboxId: prefill && prefill.inboxId ? prefill.inboxId : null });
   showEditorError('');
   $('sTitle').textContent = block ? 'Editar actividad' : 'Nueva actividad';
   $('delBtn').hidden = !block;
@@ -485,11 +476,14 @@ function openEditor(ctx, id) {
     editor.wInitial = '';
     const lastEnd = blocks.length ? Math.max(...blocks.map(b => b.e)) : 9 * 60;
     const start = Math.min(lastEnd, 22 * 60 + 30);
-    $('fT').value = '';
-    $('fS').value = toHHMM(start);
-    $('fE').value = toHHMM(Math.min(start + 60, 1439));
-    $('fN').value = '';
-    selectCategory(ctx.state.listCategories().some(c => c.key === 'libre') ? 'libre' : (ctx.state.listCategories()[0] || {}).key);
+    const slot = prefill && prefill.slot;
+    $('fT').value = prefill ? prefill.t : '';
+    $('fS').value = toHHMM(slot ? slot.s : start);
+    $('fE').value = toHHMM(slot ? slot.e : Math.min(start + 60, 1439));
+    $('fN').value = prefill ? prefill.n || '' : '';
+    const cats = ctx.state.listCategories();
+    selectCategory(prefill && cats.some(c => c.key === prefill.c) ? prefill.c
+      : cats.some(c => c.key === 'libre') ? 'libre' : (cats[0] || {}).key);
   }
 
   const measuring = Boolean(block && ctx.tracker.isRunning(key, block.id));
@@ -660,6 +654,22 @@ function setupEditor(ctx) {
     if (series && !series.ok) { showEditorError(series.error); return; }
     ctx.cloud.track('activity_saved', { is_new: !editor.id, repeats: Boolean(series), subtasks: draft.k.length > 0 });
     ctx.editSheet.close();
+    if (editor.inboxId && !editor.id) {
+      const gone = state.removeInbox(editor.inboxId);
+      if (gone.ok) {
+        const created = result.block;
+        const undoSeries = series && series.undo;
+        toast.show(t('Pasada a tu horario.'), {
+          label: 'Deshacer', duration: 7000,
+          onAction: () => {
+            if (undoSeries) undoSeries(); else if (created) state.removeBlock(editor.key, created.id);
+            state.restoreInbox(gone.removed, gone.index);
+          }
+        });
+        editor.inboxId = null;
+        return;
+      }
+    }
     if (series) {
       toast.show(editor.rule ? 'Cambio aplicado a las próximas semanas.' : `Se repetirá cada semana (${ui.weekdaysLabel(series.rule.dows)}).`, {
         label: 'Deshacer', duration: 7000, onAction: series.undo
@@ -858,7 +868,6 @@ function setupStats(ctx) {
     $('statsTabMonth').setAttribute('aria-selected', String(month));
     $('statsNav').hidden = !month;
     $('statsRange').hidden = month;
-    $('shareRow').hidden = month || !ctx.state.settings.getFlag('share');
     if (!month) {
       $('sgTitle').textContent = 'Esta semana';
       $('statsRange').textContent = ui.weekRangeLabel(weekDates(now));
@@ -892,18 +901,6 @@ function setupStats(ctx) {
     stats.month += button.id === 'statsPrev' ? -1 : 1;
     paint();
   });
-  $('shareStats').addEventListener('click', async () => {
-    const now = ctx.clock();
-    const text = buildShareText({
-      summary: ui.foldSummary(ctx.state.weekSummary(now)), range: ui.weekRangeLabel(weekDates(now)), streak: ctx.state.streakView(now).current,
-      categories: ui.summaryCategories(), nameOf: ui.categoryName
-    });
-    try {
-      const result = await shareText(text);
-      if (result === 'copied') ctx.toast.show('Resumen copiado. Pégalo donde quieras.');
-      ctx.cloud.track('share_summary');
-    } catch (_) { ctx.toast.show('No se pudo compartir el resumen.', { duration: 5000 }); }
-  });
   $('closeStats').addEventListener('click', ctx.statsSheet.close);
 }
 
@@ -914,7 +911,7 @@ function setupCategories(ctx) {
   const paint = () => { $('catList').innerHTML = ui.categoriesMarkup(state.listCategories()); };
   const showError = message => { $('catErr').textContent = message || ''; $('catErr').hidden = !message; };
 
-  $('openCats').addEventListener('click', () => { showError(''); $('catNew').value = ''; paint(); ctx.catsSheet.open(); });
+  ctx.openCategories = () => { showError(''); $('catNew').value = ''; paint(); ctx.catsSheet.open(); };
 
   const add = () => {
     const name = $('catNew').value.trim();
@@ -987,9 +984,13 @@ function describeNotifications(ctx) {
   if (s.needsInstall) return { on: false, disabled: true, text: 'En iPhone, añade primero la app a la pantalla de inicio (iOS 16.4 o superior).' };
   if (!s.supported) return { on: false, disabled: true, text: 'Este navegador no admite avisos.' };
   if (s.permission === 'denied') return { on: false, disabled: true, text: 'Bloqueados. Actívalos en los ajustes del sistema para esta app.' };
+  if (s.native && s.enabled) return { on: true, disabled: false, text: 'Te aviso cuando empiece cada actividad, incluso con la app cerrada.' };
+  if (ctx.pushActive()) {
+    return { on: true, disabled: false, text: 'Te aviso cuando empiece cada actividad, también con la app cerrada. Para eso se guarda en la nube la hora y el título de tus próximas actividades.' };
+  }
   if (s.enabled) {
-    return { on: true, disabled: false, text: s.native
-      ? 'Te aviso cuando empiece cada actividad, incluso con la app cerrada.'
+    return { on: true, disabled: false, text: ctx.pushPossible() && ctx.account.status !== 'signedIn'
+      ? 'Te aviso con la app abierta o en segundo plano. Inicia sesión para recibirlos también con la app cerrada.'
       : 'Te aviso cuando empiece cada actividad, con la app abierta o en segundo plano.' };
   }
   return { on: false, disabled: false, text: 'Recibe un aviso justo cuando empiece cada actividad.' };
@@ -1020,17 +1021,14 @@ function setupSettings(ctx) {
 
     const lead = leadOf(ctx);
     $('leadSelect').value = String(lead);
-    $('leadSelect').disabled = !notifier.status().enabled;
+    $('leadSelect').disabled = !(notifier.status().enabled || ctx.pushActive());
     $('leadStatus').textContent = lead === 0
       ? 'Te aviso justo cuando empieza cada actividad.'
       : `Te aviso ${lead} min antes de que empiece cada actividad.`;
 
     const theme = state.settings.get('theme');
-    const accent = state.settings.get('accent');
     const themeNow = THEMES.some(t => t.key === theme) ? theme : 'auto';
-    const accentNow = ACCENTS.some(a => a.key === accent) ? accent : DEFAULT_ACCENT;
     $('themeChips').innerHTML = ui.themeChipsMarkup(themeNow);
-    $('accentChips').innerHTML = ui.accentSwatchesMarkup(accentNow);
 
     const streak = state.getStreakConfig();
     $('goalSelect').value = String(streak.goal);
@@ -1044,13 +1042,6 @@ function setupSettings(ctx) {
     $('analyticsSwitch').setAttribute('aria-checked', a.on);
     $('analyticsSwitch').disabled = a.disabled;
     $('analyticsStatus').textContent = a.text;
-    const sharing = state.settings.getFlag('share');
-    $('shareSwitch').setAttribute('aria-checked', sharing);
-    $('shareStatus').textContent = sharing
-      ? 'Aparece un botón en Estadísticas para enviar un texto con tus totales por categoría y tu racha. Nunca incluye los títulos de tus actividades.'
-      : 'Desactivado. Si lo activas, podrás enviar un resumen de tu semana desde Estadísticas.';
-
-    ctx.refreshPushSetting();
     const weekly = state.settings.getFlag('weekly');
     $('weeklySwitch').setAttribute('aria-checked', weekly);
     $('weeklyStatus').textContent = weekly
@@ -1074,9 +1065,14 @@ function setupSettings(ctx) {
   });
   $('closeSettings').addEventListener('click', ctx.settingsSheet.close);
 
+  // Un solo interruptor: avisos normales y, si se puede (sesión iniciada), también con la app cerrada.
   $('notifySwitch').addEventListener('click', async () => {
-    if (notifier.status().enabled) await notifier.disable();
-    else await notifier.enable();
+    if (notifier.status().enabled || ctx.pushActive()) {
+      await notifier.disable();
+      await ctx.disablePush();
+    } else if ((await notifier.enable()) === 'granted') {
+      await ctx.enablePush();
+    }
     refreshSettings();
     ctx.syncNative();
   });
@@ -1092,7 +1088,7 @@ function setupSettings(ctx) {
     if (again) again.focus();
   };
   $('themeChips').addEventListener('click', chooseAppearance('themeChips', 'theme', 'theme'));
-  $('accentChips').addEventListener('click', chooseAppearance('accentChips', 'accent', 'accent'));
+  $('settingsTour').addEventListener('click', () => { ctx.settingsSheet.close(); ctx.openTour(); });
 
   $('goalSelect').innerHTML = STREAK_RULES.goalOptions.map(v => `<option value="${v}">${v} %</option>`).join('');
   $('goalSelect').addEventListener('change', e => {
@@ -1133,10 +1129,6 @@ function setupSettings(ctx) {
     const on = !state.settings.getFlag('weekly');
     state.settings.setFlag('weekly', on);
     if (on) ctx.markWeeklySeen();
-    refreshSettings();
-  });
-  $('shareSwitch').addEventListener('click', () => {
-    state.settings.setFlag('share', !state.settings.getFlag('share'));
     refreshSettings();
   });
   $('analyticsSwitch').addEventListener('click', () => {
@@ -1307,6 +1299,7 @@ function setupAccount(ctx) {
     }
     refreshGate(ctx);
     ctx.refreshSettings();
+    if (next.status === 'signedIn') ctx.autoEnablePush();
   });
 
   /* Cambios llegados de la nube. Primero se aplican, luego se concilia lo que solo existe aquí. */
@@ -1386,7 +1379,6 @@ function setupClock(ctx) {
     const dateKey = toDateKey(now);
     if (dateKey !== view.dateKey) { view.dateKey = dateKey; view.selectedDow = now.getDay(); view.weekOffset = 0; force = true; }
     checkStarts(now, false);
-    ctx.pomodoroTick();
     ctx.trackerTick();
     if (ctx.busy()) return; // no repintar durante un gesto; se hará al terminar
     const minuteKey = `${dateKey}-${now.getHours()}:${now.getMinutes()}`;
@@ -1411,18 +1403,11 @@ function setupClock(ctx) {
 
 /* ═════════════ Arranque ═════════════ */
 
-function setupBadges(ctx) {
-  $('streak').addEventListener('click', e => { if (e.target.closest('#openBadges')) openBadges(ctx); });
-  $('closeBadges').addEventListener('click', ctx.badgesSheet.close);
-  // Al abrir: si el historial ya da derecho a alguna insignia, se concede (una sola vez).
-  setTimeout(() => {
-    const fresh = ctx.state.checkBadges(ctx.clock());
-    if (!fresh.length) return;
-    ctx.cloud.track('badge_earned', { count: fresh.length });
-    ctx.toast.show(fresh.length === 1 ? `¡Insignia conseguida: ${fresh[0].title}!` : `¡${fresh.length} insignias conseguidas!`, {
-      label: 'Ver', duration: 7000, onAction: () => openBadges(ctx)
-    });
-  }, 4000);
+/** Menú ☰ (calendario conectado y categorías). */
+function setupMenu(ctx) {
+  $('openMenu').addEventListener('click', () => ctx.menuSheet.open());
+  $('closeMenu').addEventListener('click', ctx.menuSheet.close);
+  $('menuCats').addEventListener('click', () => ctx.openCategories());
 }
 
 /* ═════════════ App nativa (Android/iOS) ═════════════ */
@@ -1467,17 +1452,17 @@ function main() {
   setupList(ctx);
   setupEditor(ctx);
   setupDayMenu(ctx);
-  setupBadges(ctx);
+  setupMenu(ctx);
   setupTour(ctx);
   setupWeekly(ctx);
   setupPush(ctx);
   setupCalendar(ctx);
   setupSearch(ctx);
   setupMove(ctx);
+  setupInbox(ctx);
   setupCarry(ctx);
   setupTracker(ctx);
   setupNative(ctx);
-  setupMenuAndPomodoro(ctx, { openBadges: () => openBadges(ctx), openTour: () => ctx.openTour() });
   setupCategories(ctx);
   setupStats(ctx);
   setupSettings(ctx);

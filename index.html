@@ -25,8 +25,7 @@
   <header class="top">
     <span class="brand">Mi horario</span>
     <div class="tools">
-      <button class="pomo-pill trk-pill" id="trackPill" type="button" hidden aria-label="Cronómetro de actividad en marcha"></button>
-      <button class="pomo-pill" id="pomoPill" type="button" hidden aria-label="Abrir el Pomodoro"></button>
+      <button class="trk-pill" id="trackPill" type="button" hidden aria-label="Cronómetro de actividad en marcha"></button>
       <button class="icon-btn" id="openSearch" aria-label="Buscar actividades">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
       </button>
@@ -55,6 +54,7 @@
 
   <div class="actions">
     <button class="pill" id="sortBtn">Ordenar</button>
+    <button class="pill" id="inboxBtn">Sin hora</button>
     <button class="pill" id="moreBtn">Más</button>
     <button class="pill" id="addBtn">Añadir</button>
   </div>
@@ -235,6 +235,29 @@
   <div class="sub"><button id="moveCancel">Cancelar</button></div>
 </section>
 
+<!-- Actividades sin hora -->
+<section class="sheet sheet-tall" id="sheetInbox" role="dialog" aria-modal="true" aria-labelledby="sibTitle">
+  <h2 id="sibTitle">Actividades sin hora</h2>
+  <p class="set-s menu-sub">Cosas por hacer que aún no tienen día ni hora. Cuando quieras, toca «Poner hora» y pasan a tu horario.</p>
+  <div class="sub-add">
+    <input id="inboxNew" type="text" maxlength="80" placeholder="Nueva tarea sin hora" autocomplete="off" enterkeyhint="done" aria-label="Nueva tarea sin hora">
+    <button type="button" class="btn2" id="inboxAdd">Añadir</button>
+  </div>
+  <p class="err" id="inboxErr" role="alert" hidden></p>
+  <ul class="ib-list" id="inboxList"></ul>
+  <div class="ib-edit" id="inboxEdit" hidden>
+    <label class="f"><span>Tarea</span><input id="ibT" type="text" maxlength="80" autocomplete="off"></label>
+    <div class="chips" id="ibC" role="group" aria-label="Tipo de actividad"></div>
+    <label class="f"><span>Duración prevista</span><select id="ibM"></select></label>
+    <label class="f"><span>Nota</span><textarea id="ibN" rows="2" maxlength="300"></textarea></label>
+    <label class="f"><span>Para el día</span><input id="inboxDay" type="date"></label>
+    <div class="chips" id="inboxQuick" role="group" aria-label="Atajos de fecha"></div>
+    <button class="btn" id="ibSet">Poner hora…</button>
+    <div class="sub"><button id="ibSave">Guardar cambios</button> · <button id="ibDel">Eliminar</button> · <button id="ibCancel">Cancelar</button></div>
+  </div>
+  <div class="sub"><button id="closeInbox">Cerrar</button></div>
+</section>
+
 <!-- Buscar -->
 <section class="sheet sheet-tall" id="sheetSearch" role="dialog" aria-modal="true" aria-labelledby="ssTitle">
   <h2 id="ssTitle">Buscar</h2>
@@ -285,10 +308,8 @@
 <section class="sheet" id="sheetMenu" role="dialog" aria-modal="true" aria-labelledby="smTitle">
   <h2 id="smTitle">Menú</h2>
   <div class="menu">
-    <button class="menu-item" id="menuPomo"><b>Pomodoro</b><small>Temporizador para concentrarte por tramos, con descansos.</small></button>
     <button class="menu-item" id="menuCalendar"><b>Conectar con mi calendario</b><small>Tu horario aparece solo en el Calendario del iPhone o en Google Calendar.</small></button>
-    <button class="menu-item" id="menuBadges"><b>Insignias</b><small>Tus logros y lo que te falta para el siguiente.</small></button>
-    <button class="menu-item" id="menuTour"><b>Ver tutorial</b><small>Repasa en 3 pantallas cómo funciona la app.</small></button>
+    <button class="menu-item" id="menuCats"><b>Categorías</b><small>Crea las tuyas, cámbiales el nombre y el color, o elimina las que no uses.</small></button>
   </div>
   <button class="btn2 block" id="closeMenu">Cerrar</button>
 </section>
@@ -321,155 +342,112 @@
   <button class="btn2 block" id="closeCalendar">Cerrar</button>
 </section>
 
-<!-- Pomodoro -->
-<section class="sheet" id="sheetPomodoro" role="dialog" aria-modal="true" aria-labelledby="spTitle">
-  <h2 id="spTitle">Pomodoro</h2>
-  <div class="pomo">
-    <p class="pomo-phase" id="pomoPhase"></p>
-    <div class="pomo-time" id="pomoTime" role="timer" aria-live="off">25:00</div>
-    <div class="pomo-bar"><i id="pomoFill"></i></div>
-    <p class="set-s pomo-round" id="pomoRound"></p>
-    <div class="set-btns pomo-btns">
-      <button class="btn" id="pomoToggle">Empezar</button>
-      <button class="btn2" id="pomoSkip">Saltar</button>
-      <button class="btn2" id="pomoReset">Reiniciar</button>
-    </div>
-    <p class="set-s" id="pomoToday"></p>
-  </div>
-  <div class="set-block">
-    <div class="set-t">Ajustes</div>
-    <div class="set-row slim"><div class="set-t">Concentración</div><select class="select" id="pomoFocus" aria-label="Minutos de concentración"></select></div>
-    <div class="set-row slim"><div class="set-t">Descanso corto</div><select class="select" id="pomoShort" aria-label="Minutos de descanso corto"></select></div>
-    <div class="set-row slim"><div class="set-t">Descanso largo</div><select class="select" id="pomoLong" aria-label="Minutos de descanso largo"></select></div>
-    <div class="set-row slim"><div class="set-t">Rondas hasta el largo</div><select class="select" id="pomoRounds" aria-label="Rondas hasta el descanso largo"></select></div>
-  </div>
-  <button class="btn" id="closePomo">Hecho</button>
-</section>
-
-<!-- Insignias -->
-<section class="sheet" id="sheetBadges" role="dialog" aria-modal="true" aria-labelledby="sbTitle">
-  <h2 id="sbTitle">Insignias</h2>
-  <div id="badgeList"></div>
-  <button class="btn" id="closeBadges">Hecho</button>
-</section>
-
 <!-- Ajustes -->
 <section class="sheet" id="sheetSettings" role="dialog" aria-modal="true" aria-labelledby="stTitle">
   <h2 id="stTitle">Ajustes</h2>
 
-  <div class="set-row">
-    <div>
-      <div class="set-t">Avisos de actividad</div>
-      <p class="set-s" id="notifyStatus"></p>
+  <details class="set-group" id="grpNotify">
+    <summary><span>Avisos</span><small>Cuándo te aviso</small></summary>
+    <div class="set-body">
+      <div class="set-row">
+        <div>
+          <div class="set-t">Avisos de actividad</div>
+          <p class="set-s" id="notifyStatus"></p>
+        </div>
+        <button class="switch" id="notifySwitch" role="switch" aria-checked="false" aria-label="Avisos de actividad"><i></i></button>
+      </div>
+      <div class="set-row">
+        <div>
+          <div class="set-t">Avisar con antelación</div>
+          <p class="set-s" id="leadStatus"></p>
+        </div>
+        <select class="select" id="leadSelect" aria-label="Antelación del aviso"></select>
+      </div>
+      <div class="set-row">
+        <div>
+          <div class="set-t">Resumen cada semana</div>
+          <p class="set-s" id="weeklyStatus"></p>
+        </div>
+        <button class="switch" id="weeklySwitch" role="switch" aria-checked="false" aria-label="Resumen cada semana"><i></i></button>
+      </div>
     </div>
-    <button class="switch" id="notifySwitch" role="switch" aria-checked="false" aria-label="Avisos de actividad"><i></i></button>
-  </div>
+  </details>
 
-  <div class="set-row" id="pushRow" hidden>
-    <div>
-      <div class="set-t">Avisos con la app cerrada</div>
-      <p class="set-s" id="pushStatus"></p>
+  <details class="set-group" id="grpLook">
+    <summary><span>Aspecto e idioma</span><small>Tema e idioma</small></summary>
+    <div class="set-body">
+      <div class="set-block">
+        <div class="set-t">Aspecto</div>
+        <p class="set-s">Solo de este dispositivo.</p>
+        <div class="chips" id="themeChips" role="group" aria-label="Tema"></div>
+      </div>
+      <div class="set-row">
+        <div>
+          <div class="set-t">Idioma</div>
+          <p class="set-s">Cambia el idioma de la app. Tus actividades no se traducen.</p>
+        </div>
+        <select class="select" id="langSelect" aria-label="Idioma" translate="no">
+          <option value="es">Español</option>
+          <option value="en">English</option>
+        </select>
+      </div>
     </div>
-    <button class="switch" id="pushSwitch" role="switch" aria-checked="false" aria-label="Avisos con la app cerrada"><i></i></button>
-  </div>
+  </details>
 
-  <div class="set-row">
-    <div>
-      <div class="set-t">Avisar con antelación</div>
-      <p class="set-s" id="leadStatus"></p>
+  <details class="set-group" id="grpStreak">
+    <summary><span>Racha</span><small>Meta y días que cuentan</small></summary>
+    <div class="set-body">
+      <div class="set-row">
+        <div>
+          <div class="set-t">Meta diaria de la racha</div>
+          <p class="set-s" id="goalStatus"></p>
+        </div>
+        <select class="select" id="goalSelect" aria-label="Meta diaria de la racha"></select>
+      </div>
+      <div class="set-block">
+        <div class="set-t">Días que cuentan para la racha</div>
+        <p class="set-s" id="streakDaysStatus"></p>
+        <div class="chips" id="streakDays" role="group" aria-label="Días que cuentan para la racha"></div>
+      </div>
     </div>
-    <select class="select" id="leadSelect" aria-label="Antelación del aviso"></select>
-  </div>
+  </details>
 
-  <div class="set-row">
-    <div>
-      <div class="set-t">Meta diaria de la racha</div>
-      <p class="set-s" id="goalStatus"></p>
+  <details class="set-group" id="grpData">
+    <summary><span>Cuenta y datos</span><small>Sesión, copia de seguridad y privacidad</small></summary>
+    <div class="set-body">
+      <div class="set-block">
+        <div class="set-t">Cuenta</div>
+        <p class="set-s" id="accountStatus">Conectando con la nube…</p>
+        <div class="set-btns" id="accountOut" hidden>
+          <button class="btn2" type="button" id="signOutBtn">Cerrar sesión</button>
+          <button class="btn2 danger" type="button" id="deleteAccountBtn">Eliminar cuenta</button>
+        </div>
+      </div>
+      <div class="set-block">
+        <div class="set-t">Copia de seguridad</div>
+        <p class="set-s">Guarda tus horarios y anotaciones en un archivo .json o restáuralos desde uno.</p>
+        <div class="set-btns">
+          <button class="btn2" id="exportBtn">Exportar</button>
+          <button class="btn2" id="importBtn">Importar</button>
+        </div>
+        <input type="file" id="importFile" accept=".json,application/json" hidden>
+      </div>
+      <div class="set-row">
+        <div>
+          <div class="set-t">Estadísticas de uso</div>
+          <p class="set-s" id="analyticsStatus"></p>
+        </div>
+        <button class="switch" id="analyticsSwitch" role="switch" aria-checked="false" aria-label="Estadísticas de uso"><i></i></button>
+      </div>
+      <div class="set-block" id="installBlock" hidden>
+        <div class="set-t">Instalar la app</div>
+        <p class="set-s" id="installHint"></p>
+        <div class="set-btns"><button class="btn2" id="installBtn" hidden>Instalar</button></div>
+      </div>
     </div>
-    <select class="select" id="goalSelect" aria-label="Meta diaria de la racha"></select>
-  </div>
+  </details>
 
-  <div class="set-block">
-    <div class="set-t">Días que cuentan para la racha</div>
-    <p class="set-s" id="streakDaysStatus"></p>
-    <div class="chips" id="streakDays" role="group" aria-label="Días que cuentan para la racha"></div>
-  </div>
-
-  <div class="set-row">
-    <div>
-      <div class="set-t">Idioma</div>
-      <p class="set-s">Cambia el idioma de la app. Tus actividades no se traducen.</p>
-    </div>
-    <select class="select" id="langSelect" aria-label="Idioma" translate="no">
-      <option value="es">Español</option>
-      <option value="en">English</option>
-    </select>
-  </div>
-
-  <div class="set-block">
-    <div class="set-t">Aspecto</div>
-    <p class="set-s">Solo de este dispositivo.</p>
-    <div class="chips" id="themeChips" role="group" aria-label="Tema"></div>
-    <div class="swatches" id="accentChips" role="group" aria-label="Color de acento"></div>
-  </div>
-
-  <div class="set-row">
-    <div>
-      <div class="set-t">Categorías</div>
-      <p class="set-s">Crea las tuyas, cámbiales el nombre y el color, o elimina las que no uses.</p>
-    </div>
-    <button class="btn2" type="button" id="openCats">Editar</button>
-  </div>
-
-  <div class="set-row">
-    <div>
-      <div class="set-t">Compartir resumen semanal</div>
-      <p class="set-s" id="shareStatus"></p>
-    </div>
-    <button class="switch" id="shareSwitch" role="switch" aria-checked="false" aria-label="Compartir resumen semanal"><i></i></button>
-  </div>
-
-  <div class="set-row">
-    <div>
-      <div class="set-t">Resumen cada semana</div>
-      <p class="set-s" id="weeklyStatus"></p>
-    </div>
-    <button class="switch" id="weeklySwitch" role="switch" aria-checked="false" aria-label="Resumen cada semana"><i></i></button>
-  </div>
-
-  <div class="set-row">
-    <div>
-      <div class="set-t">Estadísticas de uso</div>
-      <p class="set-s" id="analyticsStatus"></p>
-    </div>
-    <button class="switch" id="analyticsSwitch" role="switch" aria-checked="false" aria-label="Estadísticas de uso"><i></i></button>
-  </div>
-
-  <div class="set-block">
-    <div class="set-t">Cuenta</div>
-    <p class="set-s" id="accountStatus">Conectando con la nube…</p>
-    <div class="set-btns" id="accountOut" hidden>
-      <button class="btn2" type="button" id="signOutBtn">Cerrar sesión</button>
-      <button class="btn2 danger" type="button" id="deleteAccountBtn">Eliminar cuenta</button>
-    </div>
-  </div>
-
-  <div class="set-block">
-    <div class="set-t">Copia de seguridad</div>
-    <p class="set-s">Guarda tus horarios y anotaciones en un archivo .json o restáuralos desde uno.</p>
-    <div class="set-btns">
-      <button class="btn2" id="exportBtn">Exportar</button>
-      <button class="btn2" id="importBtn">Importar</button>
-    </div>
-    <input type="file" id="importFile" accept=".json,application/json" hidden>
-  </div>
-
-  <div class="set-block" id="installBlock" hidden>
-    <div class="set-t">Instalar la app</div>
-    <p class="set-s" id="installHint"></p>
-    <div class="set-btns"><button class="btn2" id="installBtn" hidden>Instalar</button></div>
-  </div>
-
+  <button class="btn2 block set-tour" type="button" id="settingsTour">Ver tutorial</button>
   <p class="set-s legal-note"><a href="privacidad.html#privacidad" target="_blank" rel="noopener">Política de privacidad</a> · <a href="privacidad.html#terminos" target="_blank" rel="noopener">Términos de uso</a></p>
 
   <button class="btn" id="closeSettings">Hecho</button>
@@ -485,7 +463,6 @@
   <div class="weeknav" id="statsNav" hidden></div>
   <p class="set-s range" id="statsRange"></p>
   <div id="statsBody"></div>
-  <div class="set-btns" id="shareRow" hidden><button class="btn2" id="shareStats" type="button">Compartir resumen</button></div>
   <p class="set-s foot-note">Cuenta como hecho lo que marcas con el círculo de cada actividad.</p>
   <button class="btn" id="closeStats">Cerrar</button>
 </section>

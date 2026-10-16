@@ -6,7 +6,7 @@ globalThis.localStorage = { getItem: key => (key === 'cfg:lang' ? 'en' : null), 
 const { EN, EN_PLURAL } = await import('../src/lang-en.js');
 const i18n = await import('../src/i18n.js');
 const { plural, formatLongDate, formatDuration } = await import('../src/utils.js');
-const { DAY_NAMES, DAY_LETTERS, BADGES, PRESETS } = await import('../src/config.js');
+const { DAY_NAMES, DAY_LETTERS, PRESETS } = await import('../src/config.js');
 
 const holes = text => (text.match(/\{\d+\}/g) || []).sort().join(',');
 
@@ -46,8 +46,7 @@ test('plural, fechas y duraciones en inglés', () => {
   assert.equal(DAY_LETTERS[3], 'W');
 });
 
-test('insignias y plantillas vienen traducidas y el horario DAM no existe en inglés', () => {
-  assert.equal(BADGES[0].title, 'First step');
+test('el horario DAM de ejemplo no existe en inglés', () => {
   assert.ok(!PRESETS.some(p => p.id === 'sample-dam'));
 });
 

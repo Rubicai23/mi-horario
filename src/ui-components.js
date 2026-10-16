@@ -6,7 +6,7 @@
  * llama a las funciones que le pasan. Todo texto de usuario se escapa con escapeHtml.
  */
 import { t } from './i18n.js';
-import { ACCENTS, CATEGORY_COLORS, DAY_LETTERS, DAY_NAMES, THEMES } from './config.js';
+import { CATEGORY_COLORS, DAY_LETTERS, DAY_NAMES, THEMES } from './config.js';
 import {
   addDays, diffDays, escapeHtml, formatDuration, formatLongDate, formatShortDate, formatTotal, pad, parseDateKey, plural, toDateKey, toHHMM
 } from './utils.js';
@@ -171,22 +171,7 @@ export function streakMarkup(view) {
     `<div class="streak-count${current > 0 ? ' lit' : ''}">${ICONS.flame}<b>${current}</b><span>${current === 1 ? t('día de racha') : t('días de racha')}</span></div>` +
     `<ol class="streak-week" aria-label="Esta semana">${dots}</ol></div>` +
     `<p class="streak-msg">${streakMessage(view)}</p>${bar}` +
-    `<div class="streak-foot">${best > 0 ? `<p class="streak-best">${t('Mejor racha: {0}', plural(best, 'día', 'días'))}</p>` : '<span></span>'}` +
-    `<button type="button" class="link" id="openBadges">Insignias</button></div>`;
-}
-
-/** Hoja de insignias: las logradas con su fecha y las pendientes con su avance. */
-export function badgesMarkup(list) {
-  const earned = list.filter(b => b.earnedOn).length;
-  const head = `<p class="set-s menu-sub">${t('{0} de {1} conseguidas', earned, list.length)}</p>`;
-  return head + '<ul class="badge-grid">' + list.map(b => {
-    const got = Boolean(b.earnedOn);
-    const date = got ? t('Conseguida el {0}', formatShortDate(parseDateKey(b.earnedOn))) : t('{0} de {1}', b.value, b.target);
-    const bar = got ? '' : `<span class="track"><i style="width:${(b.value / b.target * 100).toFixed(0)}%"></i></span>`;
-    return `<li class="badge${got ? ' got' : ''}"><span class="badge-ic">${ICONS[b.icon] || ICONS.star}</span>` +
-      `<span class="badge-tx"><b>${escapeHtml(b.title)}</b><small>${escapeHtml(b.desc)}</small>` +
-      `<em>${date}</em>${bar}</span></li>`;
-  }).join('') + '</ul>';
+    `<div class="streak-foot">${best > 0 ? `<p class="streak-best">${t('Mejor racha: {0}', plural(best, 'día', 'días'))}</p>` : '<span></span>'}</div>`;
 }
 
 /* ── Lista ── */
@@ -502,9 +487,6 @@ export const monthDaysMarkup = ({ counted, met }) => (counted
 export const themeChipsMarkup = current => THEMES.map(th => (
   `<button type="button" class="chip${th.key === current ? ' sel' : ''}" data-theme="${th.key}" aria-pressed="${th.key === current}">${th.label}</button>`
 )).join('');
-export const accentSwatchesMarkup = current => ACCENTS.map(a => (
-  `<button type="button" class="swatch${a.key === current ? ' sel' : ''}" data-accent="${a.key}" style="--sw:${a.swatch}" aria-pressed="${a.key === current}" aria-label="${a.label}"></button>`
-)).join('');
 
 /** Hoja de categorías: nombre editable, paleta de colores y botón de eliminar por categoría. */
 export const categoriesMarkup = list => list.map(c => {
@@ -733,4 +715,16 @@ export function attachDragSort(list, { isEnabled, onReorder }) {
   });
 
   return { isActive: () => drag !== null };
+}
+
+/** Lista de actividades sin hora. */
+export function inboxMarkup(items) {
+  if (!items.length) return `<li class="ib-empty">${t('No tienes tareas sin hora. Apunta aquí lo que quieras hacer sin decidir cuándo.')}</li>`;
+  return items.map(item => (
+    `<li class="ib-item" data-id="${escapeHtml(item.id)}" style="--dot:${item.c ? catColor(item.c) : 'var(--line)'}">` +
+    `<button class="ck" aria-label="${t('Marcar como hecha')}"><span class="ring">${ICONS.check}</span></button>` +
+    `<button class="ib-main"><span class="ib-t" translate="no">${escapeHtml(item.t)}</span>` +
+    `<span class="ib-s">${item.m ? formatDuration(item.m) : t('Sin duración')}${item.n ? ' · ' + escapeHtml(item.n.slice(0, 40)) : ''}</span></button>` +
+    '</li>'
+  )).join('');
 }
