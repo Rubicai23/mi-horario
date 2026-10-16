@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test",
+    "test": "node --test tests/android-prepare.test.js tests/calendar-link.test.js tests/categories-month.test.js tests/custom-categories.test.js tests/feed-handler.test.js tests/feed.test.js tests/i18n.test.js tests/open-end.test.js tests/planner.test.js tests/pomodoro.test.js tests/push-logic.test.js tests/recurring-subtasks.test.js tests/state-manager.test.js tests/streak-badges.test.js tests/summary.test.js tests/templates-copy.test.js",
     "cap:sync": "npm run build && cap sync",
     "cap:android": "npm run cap:sync && cap open android",
     "cap:ios": "npm run cap:sync && cap open ios",
