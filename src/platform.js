@@ -27,6 +27,9 @@ export async function registerServiceWorker() {
 }
 
 /* ───────── Instalación como PWA ───────── */
+/** Identificador fijo de la notificación nativa del Pomodoro (la reprogramación de actividades no la toca). */
+export const POMO_ID = 2147483000;
+
 export function createInstallPrompt(onChange) {
   let deferred = null;
   if (!isNative()) {
@@ -85,7 +88,7 @@ export function createNotifier({ settings, getRegistration }) {
   });
 
   const cancelAllPending = async () => {
-    const notifications = (await (await plugin()).getPending()).notifications;
+    const notifications = (await (await plugin()).getPending()).notifications.filter(({ id }) => id !== POMO_ID);
     if (notifications.length) await (await plugin()).cancel({ notifications: notifications.map(({ id }) => ({ id })) });
   };
 
@@ -131,6 +134,29 @@ export function createNotifier({ settings, getRegistration }) {
         if (registration && registration.showNotification) await registration.showNotification(title, options);
         else new Notification(title, options);
       } catch (_) { /* algunos navegadores bloquean el constructor */ }
+    },
+
+    /** Pomodoro, web: aviso de fin de fase (solo si los avisos están activados). */
+    async announcePomodoro(title, body) {
+      if (native || !status().enabled) return;
+      const options = { body, tag: 'pomodoro', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' };
+      try {
+        const registration = await getRegistration();
+        if (registration && registration.showNotification) await registration.showNotification(title, options);
+        else new Notification(title, options);
+      } catch (_) { /* nada */ }
+    },
+
+    /** Pomodoro, nativo: programa (o cancela con `at = null`) el aviso del fin de fase, que suena con la app cerrada. */
+    schedulePomodoro(at, title, body) {
+      if (!native) return Promise.resolve();
+      queue = queue.then(async () => {
+        const lib = await plugin();
+        await lib.cancel({ notifications: [{ id: POMO_ID }] });
+        if (!at || !status().enabled) return;
+        await lib.schedule({ notifications: [{ id: POMO_ID, title, body, schedule: { at, allowWhileIdle: true } }] });
+      }).catch(() => {});
+      return queue;
     },
 
     /** Nativo: reprograma los próximos avisos. `upcoming` = [{ key, block, at, lead }] (`at` = cuándo suena). */

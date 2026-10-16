@@ -223,9 +223,7 @@ export function createCloudService({ config, native = false }) {
       if (!db || !user) return false;
       const { uid } = user;
       try {
-        const inbox = Array.isArray(profile.inbox) ? { inbox: JSON.parse(JSON.stringify(profile.inbox)) } : {};
         await setDoc(profileRef(uid), {
-          ...inbox,
           templates: JSON.parse(JSON.stringify(profile.templates)),
           recurring: JSON.parse(JSON.stringify(profile.recurring)),
           rest: JSON.parse(JSON.stringify(profile.rest || [])),

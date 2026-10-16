@@ -24,7 +24,7 @@ import { setupPush } from './push-ui.js';
 import { setupCalendar } from './calendar-ui.js';
 import { setupSearch } from './search-ui.js';
 import { setupMove } from './move-ui.js';
-import { setupInbox } from './inbox-ui.js';
+import { setupPomodoro } from './pomodoro-ui.js';
 import { setupCarry } from './carry-ui.js';
 import { setupTracker } from './tracker-ui.js';
 import { createTracker } from './tracker.js';
@@ -83,7 +83,7 @@ function createContext() {
     catsSheet: sheets.register($('sheetCats')),
     moveSheet: sheets.register($('sheetMove')),
     searchSheet: sheets.register($('sheetSearch')),
-    inboxSheet: sheets.register($('sheetInbox')),
+    pomodoroSheet: sheets.register($('sheetPomodoro')),
     deleteSheet: sheets.register($('sheetDelete')),
     view: {
       selectedDow: clock().getDay(), weekOffset: 0, sorting: false, dateKey: toDateKey(clock()), minuteKey: '', stale: false,
@@ -112,8 +112,7 @@ function createContext() {
     trackerTick: () => {},  // lo sustituye setupTracker
     paintCarry: () => {},   // lo sustituye setupCarry
     refreshCarryButton: () => {},
-    openInbox: () => {},    // lo sustituye setupInbox
-    paintInbox: () => {},
+    pomodoroTick: () => {}, // lo sustituye setupPomodoro
     openMove: () => {},     // lo sustituye setupMove
     openCategories: () => {},  // lo sustituye setupCategories
     stopTrackerFor: () => null,
@@ -262,8 +261,6 @@ function createRenderer(ctx) {
     $('sortBtn').hidden = blocks.length < 2 && !view.sorting;
     $('moreBtn').hidden = view.sorting;
     $('addBtn').hidden = view.sorting;
-    $('inboxBtn').hidden = view.sorting;
-    ctx.paintInbox();
     $('clearBtn').hidden = !blocks.length || view.sorting;
     $('hint').textContent = view.sorting
       ? 'Arrastra el icono de la derecha para mover una actividad. Las horas se recalculan manteniendo la duración de cada una.'
@@ -311,6 +308,7 @@ function toggleDone(ctx, key, id) {
   ctx.stopTrackerFor(key, id);   // al marcar como hecha una actividad que se estaba midiendo, se guarda su tiempo
   const result = ctx.state.toggleDone(key, id);
   if (!result.ok) return;
+  if (result.closedAt != null) ctx.toast.show(t('Terminada a las {0}.', toHHMM(result.closedAt)), { duration: 5000 });
   const reachedGoal = result.done && !result.before.met && result.after.met;
   if (reachedGoal && key === toDateKey(ctx.clock())) {
     const { current } = ctx.state.streakView();
@@ -366,7 +364,6 @@ function setupNavigation(ctx) {
     window.scrollTo({ top: 0 });
   });
   $('addBtn').addEventListener('click', () => openEditor(ctx, null));
-  ctx.openEditor = (id, prefill) => openEditor(ctx, id, prefill);
   $('quick').addEventListener('click', e => {
     const chip = e.target.closest('[data-preset]');
     if (chip) applyPreset(ctx, chip.dataset.preset);
@@ -423,7 +420,8 @@ function setupList(ctx) {
 /* ═════════════ Editor de actividad ═════════════ */
 
 const editor = {
-  key: null, id: null, inboxId: null, category: 'libre',
+  key: null, id: null, category: 'libre',
+  open: false,             // actividad sin hora de fin (solo inicio)
   wInitial: '',            // tiempo real (min) que se mostró al abrir: si no cambia, no se toca
   subtasks: [],            // copia de trabajo de las subtareas de la actividad
   rule: null,              // serie semanal a la que pertenece la actividad editada (si sigue vigente)
@@ -435,13 +433,25 @@ const dowOfKey = key => new Date(`${key}T12:00:00`).getDay();
 
 /** Avisa en vivo si el tramo elegido choca con otras actividades; guardar sigue siendo posible. */
 function refreshOverlapWarning(ctx) {
-  const range = { s: fromHHMM($('fS').value), e: fromHHMM($('fE').value) };
+  const range = readRange();
   const others = findOverlaps(ctx.state.getDay(editor.key), range, editor.id);
   $('fWarn').hidden = !others.length;
   $('saveBtn').textContent = others.length ? 'Guardar igualmente' : 'Guardar';
   if (!others.length) return;
   const named = others.slice(0, 2).map(b => `«${shortTitle(b.t)}» (${toHHMM(b.s)}–${toHHMM(b.e)})`).join(t(' y '));
   $('fWarn').textContent = t('Se solapa con {0}.', `${named}${others.length > 2 ? t(' y {0} más', others.length - 2) : ''}`);
+}
+
+/** Inicio y fin del editor; sin hora de fin, el fin es provisional (inicio + 60 min). */
+function readRange() {
+  const s = fromHHMM($('fS').value);
+  return { s, e: editor.open && Number.isFinite(s) ? Math.min(s + 60, 1439) : fromHHMM($('fE').value) };
+}
+
+function renderOpenEnd() {
+  $('fOpen').setAttribute('aria-checked', editor.open);
+  $('fEwrap').hidden = editor.open;
+  $('fOpenWrap').hidden = !editor.open;
 }
 
 function renderSubtasks() {
@@ -457,11 +467,11 @@ function renderRepeat() {
   $('repDays').innerHTML = ui.weekdayChipsMarkup({ selected: editor.dows, locked });
 }
 
-function openEditor(ctx, id, prefill = null) {
+function openEditor(ctx, id) {
   const key = selectedKey(ctx);
   const blocks = ctx.state.getDay(key);
   const block = id ? blocks.find(b => b.id === id) : null;
-  Object.assign(editor, { key, id: block ? block.id : null, inboxId: prefill && prefill.inboxId ? prefill.inboxId : null });
+  Object.assign(editor, { key, id: block ? block.id : null });
   showEditorError('');
   $('sTitle').textContent = block ? 'Editar actividad' : 'Nueva actividad';
   $('delBtn').hidden = !block;
@@ -469,6 +479,7 @@ function openEditor(ctx, id, prefill = null) {
     $('fT').value = block.t;
     $('fS').value = toHHMM(block.s);
     $('fE').value = toHHMM(block.e);
+    editor.open = Boolean(block.o);
     $('fN').value = block.n;
     selectCategory(block.c);
     editor.wInitial = block.w ? String(Math.max(1, Math.round(block.w / 60))) : '';
@@ -476,16 +487,15 @@ function openEditor(ctx, id, prefill = null) {
     editor.wInitial = '';
     const lastEnd = blocks.length ? Math.max(...blocks.map(b => b.e)) : 9 * 60;
     const start = Math.min(lastEnd, 22 * 60 + 30);
-    const slot = prefill && prefill.slot;
-    $('fT').value = prefill ? prefill.t : '';
-    $('fS').value = toHHMM(slot ? slot.s : start);
-    $('fE').value = toHHMM(slot ? slot.e : Math.min(start + 60, 1439));
-    $('fN').value = prefill ? prefill.n || '' : '';
-    const cats = ctx.state.listCategories();
-    selectCategory(prefill && cats.some(c => c.key === prefill.c) ? prefill.c
-      : cats.some(c => c.key === 'libre') ? 'libre' : (cats[0] || {}).key);
+    $('fT').value = '';
+    $('fS').value = toHHMM(start);
+    $('fE').value = toHHMM(Math.min(start + 60, 1439));
+    editor.open = false;
+    $('fN').value = '';
+    selectCategory(ctx.state.listCategories().some(c => c.key === 'libre') ? 'libre' : (ctx.state.listCategories()[0] || {}).key);
   }
 
+  renderOpenEnd();
   const measuring = Boolean(block && ctx.tracker.isRunning(key, block.id));
   $('fWrap').hidden = !block;
   $('moveBtn').hidden = !block;
@@ -556,6 +566,16 @@ function setupEditor(ctx) {
     if (chip) selectCategory(chip.dataset.c);
   });
 
+  $('fOpen').addEventListener('click', () => {
+    editor.open = !editor.open;
+    if (!editor.open && fromHHMM($('fE').value) <= fromHHMM($('fS').value)) {
+      $('fE').value = toHHMM(Math.min(fromHHMM($('fS').value) + 60, 1439));
+    }
+    renderOpenEnd();
+    showEditorError('');
+    refreshOverlapWarning(ctx);
+  });
+
   ['fS', 'fE'].forEach(id => {
     $(id).addEventListener('input', () => { showEditorError(''); refreshOverlapWarning(ctx); });
     $(id).addEventListener('change', () => refreshOverlapWarning(ctx));
@@ -606,8 +626,8 @@ function setupEditor(ctx) {
   const readDraft = () => {
     const draft = {
       t: $('fT').value.trim(),
-      s: fromHHMM($('fS').value),
-      e: fromHHMM($('fE').value),
+      ...readRange(),
+      o: editor.open,
       c: editor.category,
       n: $('fN').value.trim(),
       k: editor.subtasks
@@ -642,7 +662,7 @@ function setupEditor(ctx) {
       result = state.updateBlock(editor.key, editor.id, draft);
       if (result.ok && editor.repeat) {
         series = editor.rule
-          ? state.changeRecurring(editor.rule.id, editor.key, { t: draft.t, c: draft.c, s: draft.s, e: draft.e, k: draft.k, dows })
+          ? state.changeRecurring(editor.rule.id, editor.key, { t: draft.t, c: draft.c, s: draft.s, e: draft.e, k: draft.k, o: draft.o, dows })
           : state.addRecurring(editor.key, draft, dows, { blockId: editor.id });
       }
     } else if (editor.repeat) {
@@ -654,22 +674,6 @@ function setupEditor(ctx) {
     if (series && !series.ok) { showEditorError(series.error); return; }
     ctx.cloud.track('activity_saved', { is_new: !editor.id, repeats: Boolean(series), subtasks: draft.k.length > 0 });
     ctx.editSheet.close();
-    if (editor.inboxId && !editor.id) {
-      const gone = state.removeInbox(editor.inboxId);
-      if (gone.ok) {
-        const created = result.block;
-        const undoSeries = series && series.undo;
-        toast.show(t('Pasada a tu horario.'), {
-          label: 'Deshacer', duration: 7000,
-          onAction: () => {
-            if (undoSeries) undoSeries(); else if (created) state.removeBlock(editor.key, created.id);
-            state.restoreInbox(gone.removed, gone.index);
-          }
-        });
-        editor.inboxId = null;
-        return;
-      }
-    }
     if (series) {
       toast.show(editor.rule ? 'Cambio aplicado a las próximas semanas.' : `Se repetirá cada semana (${ui.weekdaysLabel(series.rule.dows)}).`, {
         label: 'Deshacer', duration: 7000, onAction: series.undo
@@ -1380,6 +1384,7 @@ function setupClock(ctx) {
     if (dateKey !== view.dateKey) { view.dateKey = dateKey; view.selectedDow = now.getDay(); view.weekOffset = 0; force = true; }
     checkStarts(now, false);
     ctx.trackerTick();
+    ctx.pomodoroTick();
     if (ctx.busy()) return; // no repintar durante un gesto; se hará al terminar
     const minuteKey = `${dateKey}-${now.getHours()}:${now.getMinutes()}`;
     if (force || view.stale || minuteKey !== view.minuteKey) { view.minuteKey = minuteKey; ctx.render(now); }
@@ -1459,7 +1464,7 @@ function main() {
   setupCalendar(ctx);
   setupSearch(ctx);
   setupMove(ctx);
-  setupInbox(ctx);
+  setupPomodoro(ctx);
   setupCarry(ctx);
   setupTracker(ctx);
   setupNative(ctx);

@@ -242,14 +242,14 @@ const itemMarkup = (b, { past, current, sorting, track }) => {
     '<button class="swipe-del" tabindex="-1" aria-hidden="true">Eliminar</button>' +
     `<div class="${classes}"${sorting ? '' : ' tabindex="0"'} style="--dot:${color}">` +
     `<span class="t">${toHHMM(b.s)}</span><span class="pt"><i></i></span>` +
-    `<span class="tx"><div class="ti" translate="no">${escapeHtml(b.t)}</div><div class="du">${t('hasta las {0}, {1}', toHHMM(b.e), formatDuration(b.e - b.s))}</div>${itemMeta(b)}${trackMarkup(b, track, sorting)}${listSubtasksMarkup(b, sorting)}${note}</span>` +
+    `<span class="tx"><div class="ti" translate="no">${escapeHtml(b.t)}</div><div class="du">${b.o ? t('sin hora de fin · al terminar, márcala') : t('hasta las {0}, {1}', toHHMM(b.e), formatDuration(b.e - b.s))}</div>${itemMeta(b)}${trackMarkup(b, track, sorting)}${listSubtasksMarkup(b, sorting)}${note}</span>` +
     `${trailing}</div></li>`;
 };
 
 export function listMarkup({ blocks, isToday, nowMin, currentIndex, sorting, presets, welcome, track = null }) {
   if (!blocks.length) return onboardingMarkup({ presets: presets.filter(p => !p.used), welcome });
   return blocks.map((b, i) => itemMarkup(b, {
-    past: isToday && nowMin >= b.e,
+    past: isToday && nowMin >= b.e && !b.o,
     current: isToday && i === currentIndex,
     sorting,
     track
@@ -715,16 +715,4 @@ export function attachDragSort(list, { isEnabled, onReorder }) {
   });
 
   return { isActive: () => drag !== null };
-}
-
-/** Lista de actividades sin hora. */
-export function inboxMarkup(items) {
-  if (!items.length) return `<li class="ib-empty">${t('No tienes tareas sin hora. Apunta aquí lo que quieras hacer sin decidir cuándo.')}</li>`;
-  return items.map(item => (
-    `<li class="ib-item" data-id="${escapeHtml(item.id)}" style="--dot:${item.c ? catColor(item.c) : 'var(--line)'}">` +
-    `<button class="ck" aria-label="${t('Marcar como hecha')}"><span class="ring">${ICONS.check}</span></button>` +
-    `<button class="ib-main"><span class="ib-t" translate="no">${escapeHtml(item.t)}</span>` +
-    `<span class="ib-s">${item.m ? formatDuration(item.m) : t('Sin duración')}${item.n ? ' · ' + escapeHtml(item.n.slice(0, 40)) : ''}</span></button>` +
-    '</li>'
-  )).join('');
 }

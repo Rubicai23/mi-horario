@@ -1,5 +1,5 @@
 /**
- * pomodoro-ui.js — Pantalla del Pomodoro y menú principal. El temporizador (pomodoro.js) no sabe nada del DOM.
+ * pomodoro-ui.js — Pantalla del Pomodoro. El temporizador (pomodoro.js) no sabe nada del DOM.
  */
 import { POMODORO_OPTIONS, createPomodoro, formatClock } from './pomodoro.js';
 import { t } from './i18n.js';
@@ -32,7 +32,7 @@ function beep() {
   } catch (_) { /* sin audio */ }
 }
 
-export function setupMenuAndPomodoro(ctx, { openBadges, openTour }) {
+export function setupPomodoro(ctx) {
   const { state, toast, notifier } = ctx;
   const timer = createPomodoro({
     load: () => state.settings.get('pomo'),
@@ -42,12 +42,8 @@ export function setupMenuAndPomodoro(ctx, { openBadges, openTour }) {
   ctx.pomodoro = timer;
   const now = () => ctx.clock().getTime();
 
-  /* Menú */
-  $('openMenu').addEventListener('click', () => ctx.menuSheet.open());
-  $('closeMenu').addEventListener('click', ctx.menuSheet.close);
+  /* Acceso */
   $('menuPomo').addEventListener('click', () => { paint(); ctx.pomodoroSheet.open(); });
-  $('menuBadges').addEventListener('click', () => openBadges());
-  $('menuTour').addEventListener('click', () => openTour());
   $('pomoPill').addEventListener('click', () => { paint(); ctx.pomodoroSheet.open(); });
   $('closePomo').addEventListener('click', ctx.pomodoroSheet.close);
 

@@ -348,16 +348,11 @@ export const EN = Object.freeze({
   'Te aviso cuando empiece cada actividad, también con la app cerrada. Para eso se guarda en la nube la hora y el título de tus próximas actividades.': 'I alert you when each activity starts, also with the app closed. To do that, the time and title of your upcoming activities are stored in the cloud.',
   'Te aviso con la app abierta o en segundo plano. Inicia sesión para recibirlos también con la app cerrada.': 'I alert you with the app open or in the background. Sign in to receive them with the app closed too.',
   'Puedes marcar días de descanso y ajustar la meta en Ajustes.': 'You can mark rest days and adjust the goal in Settings.',
-  'Con la lupa buscas cualquier actividad. En «Más» copias días, pasas pendientes a mañana, guardas plantillas y creas repeticiones. Con «Medir tiempo» ves cuánto tardas de verdad.': 'Use the magnifier to find any activity. Under “More” you copy days, move unfinished items to tomorrow, save templates and create repeats. With “No time” you jot down tasks without deciding when, and set a day and time later. With “Start timing” you see how long things really take.',
-  // Actividades sin hora
-  'Sin hora': 'No time', 'Sin hora · {0}': 'No time · {0}', 'Actividades sin hora': 'Unscheduled tasks',
-  'Cosas por hacer que aún no tienen día ni hora. Cuando quieras, toca «Poner hora» y pasan a tu horario.': 'Things to do that have no day or time yet. When you are ready, tap “Set time” and they move into your schedule.',
-  'Nueva tarea sin hora': 'New task with no time', 'Tarea': 'Task', 'Duración prevista': 'Planned length', 'Nota': 'Note',
-  'Para el día': 'For the day', 'Poner hora…': 'Set time…', 'Guardar cambios': 'Save changes',
-  'Sin duración': 'No length', 'No tienes tareas sin hora. Apunta aquí lo que quieras hacer sin decidir cuándo.': 'You have no unscheduled tasks. Jot down here anything you want to do without deciding when.',
-  'Pasada a tu horario.': 'Moved to your schedule.', 'Tarea hecha.': 'Task done.', 'Tarea eliminada.': 'Task deleted.',
-  'Escribe qué tienes que hacer.': 'Write what you need to do.', 'Máximo {0} tareas sin hora. Termina o borra alguna.': 'Maximum {0} unscheduled tasks. Finish or delete some.',
-  'La tarea no es válida.': 'The task is not valid.', 'La tarea ya no existe.': 'The task no longer exists.',
+  'Con la lupa buscas cualquier actividad. En «Más» copias días, pasas pendientes a mañana, guardas plantillas y creas repeticiones. Con «Medir tiempo» ves cuánto tardas de verdad.': 'Use the magnifier to find any activity. Under “More” you copy days, move unfinished items to tomorrow, save templates and create repeats. With “Start timing” you see how long things really take.',
+  // Actividad sin hora de fin
+  'No sé a qué hora termina': 'I don’t know when it ends', 'Sin definir': 'Not set',
+  'Pon solo la hora de inicio. Al marcarla como hecha, se guarda sola la hora a la que terminaste.': 'Enter only the start time. When you mark it as done, the time you finished is saved automatically.',
+  'sin hora de fin · al terminar, márcala': 'no end time · mark it when you finish', 'Terminada a las {0}.': 'Finished at {0}.',
 });
 
 /** Palabras sueltas que cambian con el número: [singular, plural]. */

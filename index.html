@@ -25,6 +25,7 @@
   <header class="top">
     <span class="brand">Mi horario</span>
     <div class="tools">
+      <button class="pomo-pill" id="pomoPill" type="button" hidden aria-label="Abrir el Pomodoro"></button>
       <button class="trk-pill" id="trackPill" type="button" hidden aria-label="Cronómetro de actividad en marcha"></button>
       <button class="icon-btn" id="openSearch" aria-label="Buscar actividades">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
@@ -54,7 +55,6 @@
 
   <div class="actions">
     <button class="pill" id="sortBtn">Ordenar</button>
-    <button class="pill" id="inboxBtn">Sin hora</button>
     <button class="pill" id="moreBtn">Más</button>
     <button class="pill" id="addBtn">Añadir</button>
   </div>
@@ -115,7 +115,15 @@
   <label class="f"><span>Actividad</span><input id="fT" type="text" maxlength="80" autocomplete="off"></label>
   <div class="g2">
     <label class="f"><span>Inicio</span><input id="fS" type="time"></label>
-    <label class="f"><span>Fin</span><input id="fE" type="time"></label>
+    <label class="f" id="fEwrap"><span>Fin</span><input id="fE" type="time"></label>
+    <div class="f open-end" id="fOpenWrap" hidden><span>Fin</span><em class="set-s">Sin definir</em></div>
+  </div>
+  <div class="set-row slim open-row">
+    <div>
+      <div class="set-t">No sé a qué hora termina</div>
+      <p class="set-s">Pon solo la hora de inicio. Al marcarla como hecha, se guarda sola la hora a la que terminaste.</p>
+    </div>
+    <button type="button" class="switch" id="fOpen" role="switch" aria-checked="false" aria-label="No sé a qué hora termina"><i></i></button>
   </div>
   <div class="chips" id="fC" role="group" aria-label="Tipo de actividad"></div>
   <div class="sub-add cat-add">
@@ -235,29 +243,6 @@
   <div class="sub"><button id="moveCancel">Cancelar</button></div>
 </section>
 
-<!-- Actividades sin hora -->
-<section class="sheet sheet-tall" id="sheetInbox" role="dialog" aria-modal="true" aria-labelledby="sibTitle">
-  <h2 id="sibTitle">Actividades sin hora</h2>
-  <p class="set-s menu-sub">Cosas por hacer que aún no tienen día ni hora. Cuando quieras, toca «Poner hora» y pasan a tu horario.</p>
-  <div class="sub-add">
-    <input id="inboxNew" type="text" maxlength="80" placeholder="Nueva tarea sin hora" autocomplete="off" enterkeyhint="done" aria-label="Nueva tarea sin hora">
-    <button type="button" class="btn2" id="inboxAdd">Añadir</button>
-  </div>
-  <p class="err" id="inboxErr" role="alert" hidden></p>
-  <ul class="ib-list" id="inboxList"></ul>
-  <div class="ib-edit" id="inboxEdit" hidden>
-    <label class="f"><span>Tarea</span><input id="ibT" type="text" maxlength="80" autocomplete="off"></label>
-    <div class="chips" id="ibC" role="group" aria-label="Tipo de actividad"></div>
-    <label class="f"><span>Duración prevista</span><select id="ibM"></select></label>
-    <label class="f"><span>Nota</span><textarea id="ibN" rows="2" maxlength="300"></textarea></label>
-    <label class="f"><span>Para el día</span><input id="inboxDay" type="date"></label>
-    <div class="chips" id="inboxQuick" role="group" aria-label="Atajos de fecha"></div>
-    <button class="btn" id="ibSet">Poner hora…</button>
-    <div class="sub"><button id="ibSave">Guardar cambios</button> · <button id="ibDel">Eliminar</button> · <button id="ibCancel">Cancelar</button></div>
-  </div>
-  <div class="sub"><button id="closeInbox">Cerrar</button></div>
-</section>
-
 <!-- Buscar -->
 <section class="sheet sheet-tall" id="sheetSearch" role="dialog" aria-modal="true" aria-labelledby="ssTitle">
   <h2 id="ssTitle">Buscar</h2>
@@ -304,10 +289,36 @@
   <div class="sub"><button id="delCancel">Cancelar</button></div>
 </section>
 
+<!-- Pomodoro -->
+<section class="sheet" id="sheetPomodoro" role="dialog" aria-modal="true" aria-labelledby="spTitle">
+  <h2 id="spTitle">Pomodoro</h2>
+  <div class="pomo">
+    <p class="pomo-phase" id="pomoPhase"></p>
+    <div class="pomo-time" id="pomoTime" role="timer" aria-live="off">25:00</div>
+    <div class="pomo-bar"><i id="pomoFill"></i></div>
+    <p class="set-s pomo-round" id="pomoRound"></p>
+    <div class="set-btns pomo-btns">
+      <button class="btn" id="pomoToggle">Empezar</button>
+      <button class="btn2" id="pomoSkip">Saltar</button>
+      <button class="btn2" id="pomoReset">Reiniciar</button>
+    </div>
+    <p class="set-s" id="pomoToday"></p>
+  </div>
+  <div class="set-block">
+    <div class="set-t">Ajustes</div>
+    <div class="set-row slim"><div class="set-t">Concentración</div><select class="select" id="pomoFocus" aria-label="Minutos de concentración"></select></div>
+    <div class="set-row slim"><div class="set-t">Descanso corto</div><select class="select" id="pomoShort" aria-label="Minutos de descanso corto"></select></div>
+    <div class="set-row slim"><div class="set-t">Descanso largo</div><select class="select" id="pomoLong" aria-label="Minutos de descanso largo"></select></div>
+    <div class="set-row slim"><div class="set-t">Rondas hasta el largo</div><select class="select" id="pomoRounds" aria-label="Rondas hasta el descanso largo"></select></div>
+  </div>
+  <button class="btn" id="closePomo">Hecho</button>
+</section>
+
 <!-- Menú principal -->
 <section class="sheet" id="sheetMenu" role="dialog" aria-modal="true" aria-labelledby="smTitle">
   <h2 id="smTitle">Menú</h2>
   <div class="menu">
+    <button class="menu-item" id="menuPomo"><b>Pomodoro</b><small>Temporizador para concentrarte por tramos, con descansos.</small></button>
     <button class="menu-item" id="menuCalendar"><b>Conectar con mi calendario</b><small>Tu horario aparece solo en el Calendario del iPhone o en Google Calendar.</small></button>
     <button class="menu-item" id="menuCats"><b>Categorías</b><small>Crea las tuyas, cámbiales el nombre y el color, o elimina las que no uses.</small></button>
   </div>

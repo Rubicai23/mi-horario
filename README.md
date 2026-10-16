@@ -130,15 +130,16 @@ npm run cap:android      # build + sync + abrir Android Studio
 - Pruebas: `tests/planner.test.js` (lógica) y `e2e/t11.mjs` (navegador).
 
 
-## Tanda 9 — limpieza y «Sin hora»
+## Tanda 9 — limpieza y actividades sin hora de fin
 
-**Quitado:** Compartir resumen semanal, colores de acento, Insignias y Pomodoro.
+**Quitado:** Compartir resumen semanal, colores de acento e Insignias (el Pomodoro se mantiene).
 **Juntado:** los 3 avisos en un solo interruptor «Avisos» (más cuánto antes); meta y días de racha en «Racha».
 **Movido:** Categorías al menú ☰; «Estadísticas de uso» a «Cuenta y datos»; «Ver tutorial» al final de Ajustes.
-Ajustes tiene ahora 4 bloques plegables: Avisos, Aspecto e idioma, Racha, Cuenta y datos.
+Ajustes tiene 4 bloques plegables: Avisos, Aspecto e idioma, Racha, Cuenta y datos.
 
-**Nuevo — Actividades sin hora** (botón «Sin hora» junto a Añadir): lista de tareas sin día ni hora (máx. 50).
-Tocar el cuadro la completa (con Deshacer); tocar el texto la edita; «Poner hora…» elige día, propone el primer hueco
-libre y abre el editor ya rellenado. Se sincroniza en el perfil (`inbox`).
-**Hay que republicar las reglas:** `firebase deploy --only firestore:rules`.
-**Borra en GitHub** los archivos viejos: `tests/pomodoro.test.js`, `src/pomodoro.js`, `src/pomodoro-ui.js`, `tests/tags.test.js`, `tests/ics.test.js`, `src/export-ui.js`, `src/ics.js`.
+**Nuevo — «No sé a qué hora termina»:** en el editor, un interruptor deja la actividad solo con hora de inicio
+(campo `o` en la actividad; `e` es una hora provisional = inicio + 60 min para que el resto de la app siga funcionando).
+Al marcarla como hecha, hoy se guarda como fin la hora de ese momento (mínimo 5 min); en otro día se queda la provisional.
+También vale en repeticiones semanales. No hace falta republicar las reglas de Firestore.
+
+**Borra en GitHub** los archivos viejos: `tests/tags.test.js`, `tests/ics.test.js`, `src/export-ui.js`, `src/ics.js`.

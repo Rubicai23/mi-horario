@@ -17,8 +17,6 @@ import { isEnglish, t } from './i18n.js';
 /* ───────── Límites y reglas de negocio ───────── */
 export const MAX_MIN = 1439;            // 23:59
 /** Duraciones que se pueden estimar para una tarea sin hora (minutos). */
-export const INBOX_MINUTES = Object.freeze([15, 30, 45, 60, 90, 120, 180]);
-export const INBOX_DEFAULT_MINUTES = 30;
 
 export const LIMITS = Object.freeze({
   blocksPerDay: 60,                     // debe coincidir con firestore.rules
@@ -32,8 +30,7 @@ export const LIMITS = Object.freeze({
   restDays: 400,                        // debe coincidir con firestore.rules
   badges: 40,                           // debe coincidir con firestore.rules
   categories: 20,                       // categorías activas como máximo; firestore.rules admite 20 + las 6 iniciales (26)
-  categoryLabel: 20,
-  inbox: 50,                            // tareas sin hora; debe coincidir con firestore.rules
+  categoryLabel: 20,                            // tareas sin hora; debe coincidir con firestore.rules
 
 });
 

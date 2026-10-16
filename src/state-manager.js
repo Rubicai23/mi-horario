@@ -12,7 +12,7 @@
  * Los días son inmutables (arrays congelados): cada cambio crea un array nuevo.
  */
 import {
-  BACKUP, BADGES, CATEGORIES, CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR, INBOX_DEFAULT_MINUTES, LEAD_OPTIONS, LIMITS, MAX_MIN, PRESETS, STORAGE, STREAK_RULES, THEMES
+  BACKUP, BADGES, CATEGORIES, CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR, LEAD_OPTIONS, LIMITS, MAX_MIN, PRESETS, STORAGE, STREAK_RULES, THEMES
 } from './config.js';
 import {
   addDays, diffDays, fromHHMM, isDateKey, parseDateKey, startOfDay, toDateKey, toHHMM, uid, weekDates
@@ -69,6 +69,7 @@ export function sanitizeBlock(raw) {
     n: typeof raw.n === 'string' ? raw.n.slice(0, LIMITS.noteLength) : '',
     d: raw.d === true
   };
+  if (raw.o === true) block.o = true;   // sin hora de fin: `e` es solo una hora provisional (inicio + 60 min)
   if (typeof raw.p === 'string' && PRESET_ID_RE.test(raw.p)) block.p = raw.p;
   const k = sanitizeSubtasks(raw.k);
   if (k.length) block.k = k;
@@ -97,6 +98,7 @@ export function sanitizeTemplate(raw) {
 /** Lo que una plantilla o regla conserva de una actividad: horas, título, tipo y subtareas sin marcar. */
 function structureOf(block) {
   const out = { s: block.s, e: block.e, t: block.t, c: block.c };
+  if (block.o) out.o = true;
   if (block.k) out.k = block.k.map(item => ({ t: item.t, d: false }));
   return out;
 }
@@ -106,11 +108,12 @@ function structureOf(block) {
 /** Regla: { id, t, c, s, e, dows:[0-6], from, until?, k? }. Genera una actividad cada semana en esos días. */
 export function sanitizeRule(raw) {
   if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !RULE_ID_RE.test(raw.id)) return null;
-  const base = sanitizeBlock({ id: 'x', s: raw.s, e: raw.e, t: raw.t, c: raw.c, k: raw.k });
+  const base = sanitizeBlock({ id: 'x', s: raw.s, e: raw.e, t: raw.t, c: raw.c, k: raw.k, o: raw.o });
   const dows = Array.from(new Set((Array.isArray(raw.dows) ? raw.dows : []).map(Number)
     .filter(n => Number.isInteger(n) && n >= 0 && n <= 6))).sort((a, b) => a - b);
   if (!base || !dows.length || !isDateKey(raw.from)) return null;
   const rule = { id: raw.id, t: base.t, c: base.c, s: base.s, e: base.e, dows, from: raw.from };
+  if (base.o) rule.o = true;
   if (base.k) rule.k = base.k.map(item => ({ t: item.t, d: false }));
   if (isDateKey(raw.until)) rule.until = raw.until;
   return rule;
@@ -125,7 +128,7 @@ export const ruleAppliesOn = (rule, key) => key >= rule.from
 export const occurrenceId = (rule, key) => `${rule.id}-${key.replace(/-/g, '')}`;
 
 export const occurrenceBlock = (rule, key) => sanitizeBlock({
-  id: occurrenceId(rule, key), s: rule.s, e: rule.e, t: rule.t, c: rule.c, n: '', d: false, k: rule.k, r: rule.id
+  id: occurrenceId(rule, key), s: rule.s, e: rule.e, t: rule.t, c: rule.c, n: '', d: false, k: rule.k, r: rule.id, o: rule.o
 });
 
 /** Actividades que las reglas generan para un día (sin guardar). */
@@ -175,31 +178,6 @@ export function activeCategories(cats = {}) {
   return out;
 }
 
-/* ═══════════════ Actividades sin hora ═══════════════ */
-
-const INBOX_ID_RE = /^i[a-z0-9]{1,20}$/;
-
-/** Tarea sin hora: { id, t, c?, m?, n? } (título, categoría, minutos estimados y nota). null si no sirve. */
-export function sanitizeInboxItem(raw) {
-  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !INBOX_ID_RE.test(raw.id)) return null;
-  const t = typeof raw.t === 'string' ? raw.t.trim().slice(0, LIMITS.titleLength) : '';
-  if (!t) return null;
-  const item = { id: raw.id, t };
-  if (isCategoryId(raw.c)) item.c = raw.c;
-  const m = Math.round(Number(raw.m));
-  if (m >= 5 && m <= 600) item.m = m;
-  const n = typeof raw.n === 'string' ? raw.n.trim().slice(0, LIMITS.noteLength) : '';
-  if (n) item.n = n;
-  return item;
-}
-
-/** Lista limpia (sin repetidos y con tope), o null si `raw` no es una lista. */
-export function sanitizeInbox(raw) {
-  if (!Array.isArray(raw)) return null;
-  const seen = new Set();
-  return raw.map(sanitizeInboxItem).filter(item => item && !seen.has(item.id) && seen.add(item.id)).slice(0, LIMITS.inbox);
-}
-
 /** Perfil del usuario (se sincroniza como un único documento). null si no es un objeto. */
 export function sanitizeProfile(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -226,8 +204,6 @@ export function sanitizeProfile(raw) {
   if (Object.keys(badges).length) profile.badges = badges;
   const cats = sanitizeCategories(raw.cats);
   if (Object.keys(cats).length) profile.cats = cats;
-  const inbox = sanitizeInbox(raw.inbox);
-  if (inbox) profile.inbox = inbox;   // presente (aunque vacía) una vez que se ha usado: así vaciarla se sincroniza
   return profile;
 }
 
@@ -235,7 +211,6 @@ export function sanitizeProfile(raw) {
 export const profileHasData = profile => Boolean(profile && (
   profile.templates.length || profile.recurring.length || (profile.rest && profile.rest.length)
   || profile.streak || (profile.badges && Object.keys(profile.badges).length) || (profile.cats && Object.keys(profile.cats).length)
-  || (profile.inbox && profile.inbox.length)
 ));
 
 /** Une dos mapas de insignias: se queda la fecha más antigua de cada una. */
@@ -740,7 +715,6 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
     if (value.cats && Object.keys(value.cats).length) {
       out.cats = Object.freeze(Object.fromEntries(Object.entries(value.cats).map(([k, v]) => [k, Object.freeze({ ...v })])));
     }
-    if (value.inbox) out.inbox = Object.freeze(value.inbox.map(item => Object.freeze({ ...item })));
     return Object.freeze(out);
   };
   let profile = null;
@@ -825,7 +799,7 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
     };
   };
 
-  const FIELDS = ['t', 's', 'e', 'c', 'n', 'k', 'w'];
+  const FIELDS = ['t', 's', 'e', 'c', 'n', 'k', 'w', 'o'];
   const pickFields = patch => Object.fromEntries(FIELDS.filter(f => f in patch).map(f => [f, patch[f]]));
 
   const api = {
@@ -897,10 +871,23 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
       const current = load(key);
       const target = current.find(b => b.id === id);
       if (!target) return { ok: false };
-      const next = current.map(b => (b.id === id ? { ...b, d: !b.d } : b));
+      // Una actividad sin hora de fin se cierra al terminarla: hoy, con la hora de ahora; otro día, se queda la provisional.
+      let closedAt = null;
+      const finish = b => {
+        if (!(b.o && !b.d)) return { ...b, d: !b.d };
+        const { o, ...rest } = b;
+        const now = clock();
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        if (key === todayKey() && nowMin > b.s) {
+          closedAt = Math.min(1439, Math.max(b.s + 5, nowMin));
+          return { ...rest, e: closedAt, d: true };
+        }
+        return { ...rest, d: true };
+      };
+      const next = current.map(b => (b.id === id ? finish(b) : b));
       commit(key, next);
       const { goal } = streakConfig();
-      return { ok: true, done: !target.d, before: dayProgress(current, goal), after: dayProgress(next, goal) };
+      return { ok: true, done: !target.d, closedAt, before: dayProgress(current, goal), after: dayProgress(next, goal) };
     },
 
     reorder(key, orderedIds) {
@@ -1071,65 +1058,6 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
       });
     },
 
-    /* Actividades sin hora: lista de tareas por hacer que aún no tienen día ni hora (se sincroniza en el perfil) */
-    listInbox: () => loadProfile().inbox || [],
-
-    addInbox(draft = {}) {
-      const list = loadProfile().inbox || [];
-      if (!(typeof draft.t === 'string' && draft.t.trim())) return { ok: false, error: 'Escribe qué tienes que hacer.' };
-      if (list.length >= LIMITS.inbox) return { ok: false, error: `Máximo ${LIMITS.inbox} tareas sin hora. Termina o borra alguna.` };
-      const item = sanitizeInboxItem({ t: draft.t, c: draft.c, m: draft.m, n: draft.n, id: `i${uid().slice(1, 13)}` });
-      if (!item) return { ok: false, error: 'La tarea no es válida.' };
-      commitProfile({ ...loadProfile(), inbox: [...list, item] });
-      return { ok: true, item };
-    },
-
-    /** Cambia título, categoría (`c: ''` la quita), minutos (`m: 0` los quita) o nota de una tarea sin hora. */
-    updateInbox(id, patch = {}) {
-      const list = loadProfile().inbox || [];
-      const current = list.find(item => item.id === id);
-      if (!current) return { ok: false, error: 'La tarea ya no existe.' };
-      const merged = { ...current };
-      ['t', 'c', 'm', 'n'].forEach(field => { if (field in patch) merged[field] = patch[field]; });
-      if (!(typeof merged.t === 'string' && merged.t.trim())) return { ok: false, error: 'Escribe qué tienes que hacer.' };
-      const item = sanitizeInboxItem(merged);
-      if (!item) return { ok: false, error: 'La tarea no es válida.' };
-      commitProfile({ ...loadProfile(), inbox: list.map(x => (x.id === id ? item : x)) });
-      return { ok: true, item, previous: current };
-    },
-
-    removeInbox(id) {
-      const list = loadProfile().inbox || [];
-      const index = list.findIndex(item => item.id === id);
-      if (index < 0) return { ok: false };
-      commitProfile({ ...loadProfile(), inbox: list.filter(item => item.id !== id) });
-      return { ok: true, removed: list[index], index };
-    },
-
-    /** Deshacer: vuelve a poner la tarea en su sitio. */
-    restoreInbox(item, index = Infinity) {
-      const clean = sanitizeInboxItem(item);
-      const list = loadProfile().inbox || [];
-      if (!clean || list.some(x => x.id === clean.id) || list.length >= LIMITS.inbox) return { ok: false };
-      const next = list.slice();
-      next.splice(Math.min(Math.max(0, index), next.length), 0, clean);
-      commitProfile({ ...loadProfile(), inbox: next });
-      return { ok: true };
-    },
-
-    /**
-     * Hora propuesta para una tarea sin hora en el día `key`: el primer hueco libre (desde ahora si es hoy,
-     * desde las 9:00 si es otro día). Devuelve { s, e }; si no cabe, null.
-     */
-    suggestSlot(key, minutes = INBOX_DEFAULT_MINUTES) {
-      assertDateKey(key);
-      const length = Math.min(Math.max(5, Math.round(minutes)), MAX_MIN);
-      const now = clock();
-      const from = key === todayKey() ? Math.ceil((now.getHours() * 60 + now.getMinutes() + 1) / 5) * 5 : 9 * 60;
-      const start = findFreeSlot(load(key), length, from);
-      return start === null ? null : { s: start, e: start + length };
-    },
-
     /* Repeticiones semanales (se guardan como reglas en el perfil y se sincronizan) */
     listRecurring: () => loadProfile().recurring,
 
@@ -1147,7 +1075,7 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
         return { ok: false, error: `Máximo ${LIMITS.recurring} repeticiones. Quita alguna.` };
       }
       const rule = sanitizeRule({
-        id: newRuleId(), t: draft.t, c: draft.c, s: draft.s, e: draft.e, k: draft.k,
+        id: newRuleId(), t: draft.t, c: draft.c, s: draft.s, e: draft.e, k: draft.k, o: draft.o,
         dows: [...(Array.isArray(dows) ? dows : []), dowOf(key)], from: key
       });
       if (!rule) return { ok: false, error: 'La repetición no es válida.' };
@@ -1224,6 +1152,7 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
         s: 's' in patch ? patch.s : old.s,
         e: 'e' in patch ? patch.e : old.e,
         k: 'k' in patch ? patch.k : old.k,
+        o: 'o' in patch ? patch.o : old.o,
         dows: 'dows' in patch ? patch.dows : old.dows
       };
       const error = validateDraft(merged);
@@ -1552,7 +1481,6 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
         rest: remote.rest == null ? local.rest : clean.rest,
         streak: remote.streak == null ? local.streak : clean.streak,
         cats: remote.cats == null ? local.cats : clean.cats,
-        inbox: remote.inbox == null ? local.inbox : clean.inbox,
         badges: unionBadges(local.badges, clean.badges)
       });
       const extraBadges = Object.keys(merged.badges || {}).length > Object.keys(clean.badges || {}).length;
@@ -1625,7 +1553,6 @@ export function createStateManager({ storage, sync = NO_SYNC, clock = () => new 
           rest: Array.from(new Set([...(current.rest || []), ...(imported.rest || [])])),
           streak: current.streak || imported.streak,
           cats: { ...imported.cats, ...current.cats },
-          inbox: (current.inbox || imported.inbox) ? mergeById(current.inbox || [], imported.inbox || [], LIMITS.inbox) : undefined,
           badges: unionBadges(current.badges, imported.badges)
         }), 'import');
       }
